@@ -1,0 +1,6 @@
+{
+  "goal": "Parse and reshape JSON data to extract name and value fields",
+  "expected_skills": ["json.reshape.v1"],
+  "expected_output_names": ["selected"],
+  "min_nodes": 1
+}

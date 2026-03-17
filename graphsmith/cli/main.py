@@ -719,6 +719,90 @@ def promote_candidates(
         typer.echo()
 
 
+# ── eval-planner ─────────────────────────────────────────────────────
+
+
+@app.command("eval-planner")
+def eval_planner(
+    goals_dir: str = typer.Option(
+        "evaluation/goals", "--goals",
+        help="Directory containing goal JSON files.",
+    ),
+    registry_root: Optional[str] = typer.Option(
+        None, "--registry", help="Registry root with published skills.",
+    ),
+    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock or llm."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL."),
+    save_results: Optional[str] = typer.Option(
+        None, "--save-results",
+        help="Save results JSON to this path.",
+    ),
+    output_format: str = typer.Option("text", "--output-format", help="text or json."),
+) -> None:
+    """Evaluate planner quality against a set of known goals."""
+    from graphsmith.evaluation.planner_eval import load_goals, run_evaluation
+    from graphsmith.registry import LocalRegistry
+
+    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    planner_backend = _make_planner_backend(
+        backend, mock_llm, provider=provider, model=model, base_url=base_url,
+    )
+
+    goals = load_goals(goals_dir)
+    if not goals:
+        typer.secho("No goal files found.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+    report = run_evaluation(
+        goals, reg, planner_backend,
+        provider_name=provider if backend == "llm" else "mock",
+        model_name=model or "",
+    )
+
+    if save_results:
+        Path(save_results).write_text(
+            json.dumps(report.model_dump(), indent=2) + "\n", encoding="utf-8",
+        )
+        typer.secho(f"Results saved: {save_results}", fg=typer.colors.CYAN, err=True)
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.model_dump(), indent=2))
+        return
+
+    # Text output
+    typer.echo(f"Planner Evaluation ({report.provider} {report.model})")
+    typer.echo(f"{'=' * 50}")
+    typer.echo(f"Goals: {report.goals_total}  Passed: {report.goals_passed}  "
+               f"Rate: {report.pass_rate:.0%}\n")
+
+    for r in report.results:
+        icon = "pass" if r.status == "pass" else "PARTIAL" if r.status == "partial" else "FAIL"
+        typer.echo(f"  [{icon}] {r.goal}  (score: {r.score:.2f})")
+        if r.status != "pass":
+            c = r.checks
+            fails = []
+            if not c.parsed:
+                fails.append("parse failed")
+            if not c.has_graph:
+                fails.append("no graph")
+            if not c.validates:
+                fails.append("validation failed")
+            if not c.correct_skills:
+                fails.append("wrong skills")
+            if not c.correct_outputs:
+                fails.append("wrong outputs")
+            if not c.min_nodes_met:
+                fails.append("too few nodes")
+            if not c.no_holes:
+                fails.append("has holes")
+            typer.echo(f"         issues: {', '.join(fails)}")
+            if r.error:
+                typer.echo(f"         error: {r.error[:120]}")
+
+
 # ── helpers ──────────────────────────────────────────────────────────
 
 

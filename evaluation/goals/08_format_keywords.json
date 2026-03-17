@@ -1,0 +1,7 @@
+{
+  "goal": "Extract keywords from text and format them as a list",
+  "expected_skills": ["text.extract_keywords.v1", "text.join_lines.v1"],
+  "expected_output_names": ["joined"],
+  "min_nodes": 2,
+  "required_effects": ["llm_inference"]
+}

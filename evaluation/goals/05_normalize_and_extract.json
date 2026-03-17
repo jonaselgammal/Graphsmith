@@ -1,0 +1,7 @@
+{
+  "goal": "Normalize this text and extract keywords",
+  "expected_skills": ["text.normalize.v1", "text.extract_keywords.v1"],
+  "expected_output_names": ["normalized", "keywords"],
+  "min_nodes": 2,
+  "required_effects": ["llm_inference"]
+}
