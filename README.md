@@ -24,24 +24,10 @@ Everything runs locally.
 | **Traces** | One JSON file per execution. Records node-level timing, inputs, outputs, and nested child traces. |
 | **Promotion** | Mines stored traces for repeated op-sequence patterns and flags them as candidates for extraction into reusable skills. |
 
-```
-Reusable Skills              Task-Specific Glue Graph
-┌────────────────┐           ┌──────────────────────────┐
-│ normalize.v1   │──────────▶│ normalize → extract_kw   │──▶ outputs
-│ extract_kw.v1  │──────────▶│  (planned, validated,    │
-│ summarize.v1   │           │   executed, traced)       │
-└────────────────┘           └──────────────────────────┘
-        │                              │
-        ▼                              ▼
-    Registry                    Execution Traces
-                                       │
-                                       ▼
-                              Promotion Candidates
-```
-
 ## How Graphsmith works
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e8f4f8', 'primaryTextColor': '#1a1a1a', 'primaryBorderColor': '#4a90d9', 'lineColor': '#555555', 'secondaryColor': '#f0f0f0', 'tertiaryColor': '#ffffff', 'background': '#ffffff', 'mainBkg': '#ffffff', 'nodeBorder': '#4a90d9', 'clusterBkg': '#f8f9fa', 'clusterBorder': '#cccccc', 'titleColor': '#1a1a1a', 'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TD
     Goal["User Goal<br/>(natural language)"] --> Planner
 
@@ -80,9 +66,9 @@ flowchart TD
 
     Traces --> Promotion["Promotion<br/>Candidate Mining"]
 
-    style GlueGraph fill:#ffd,stroke:#aa0
-    style SkillPackages fill:#dfd,stroke:#0a0
-    style Registry fill:#def,stroke:#08a
+    style GlueGraph fill:#fff3cd,stroke:#aa8800,color:#1a1a1a
+    style SkillPackages fill:#d4edda,stroke:#28a745,color:#1a1a1a
+    style Registry fill:#cce5ff,stroke:#0066cc,color:#1a1a1a
 ```
 
 See [docs/ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) for the full diagram set.
