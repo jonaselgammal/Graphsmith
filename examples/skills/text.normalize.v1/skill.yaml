@@ -1,0 +1,21 @@
+id: text.normalize.v1
+name: Normalize Text
+version: 1.0.0
+description: Lowercase and trim whitespace from text.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: normalized
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - cleanup
+  - normalization

@@ -1,0 +1,36 @@
+{
+  "goal": "Normalize text and extract keywords",
+  "inputs": [
+    {"name": "text", "type": "string", "required": true}
+  ],
+  "outputs": [
+    {"name": "normalized", "type": "string", "required": true},
+    {"name": "keywords", "type": "string", "required": true}
+  ],
+  "effects": ["llm_inference"],
+  "graph": {
+    "version": 1,
+    "nodes": [
+      {
+        "id": "normalize",
+        "op": "skill.invoke",
+        "inputs": {},
+        "config": {"skill_id": "text.normalize.v1", "version": "1.0.0"}
+      },
+      {
+        "id": "extract",
+        "op": "skill.invoke",
+        "inputs": {},
+        "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}
+      }
+    ],
+    "edges": [
+      {"from": "input.text", "to": "normalize.text"},
+      {"from": "normalize.normalized", "to": "extract.text"}
+    ],
+    "outputs": {
+      "normalized": "normalize.normalized",
+      "keywords": "extract.keywords"
+    }
+  }
+}

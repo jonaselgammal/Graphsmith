@@ -1,0 +1,11 @@
+examples:
+  - name: whitespace_and_case
+    input:
+      text: "  AI   agents are transforming SOFTWARE engineering  "
+    expected_output:
+      normalized: "ai agents are transforming software engineering"
+  - name: simple
+    input:
+      text: "  Hello World  "
+    expected_output:
+      normalized: "hello world"

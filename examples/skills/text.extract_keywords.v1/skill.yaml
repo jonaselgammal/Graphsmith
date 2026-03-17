@@ -1,0 +1,24 @@
+id: text.extract_keywords.v1
+name: Extract Keywords
+version: 1.0.0
+description: Extract keywords from text as a comma-separated list using an LLM.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: keywords
+    type: string
+
+effects:
+  - llm_inference
+
+dependencies:
+  - llm.generate
+
+tags:
+  - text
+  - keywords
+  - extraction

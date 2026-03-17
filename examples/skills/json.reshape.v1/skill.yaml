@@ -1,0 +1,21 @@
+id: json.reshape.v1
+name: Reshape JSON
+version: 1.0.0
+description: Parse a JSON string and select the name and value fields.
+
+inputs:
+  - name: raw_json
+    type: string
+    required: true
+
+outputs:
+  - name: selected
+    type: object
+
+effects:
+  - pure
+
+tags:
+  - json
+  - transform
+  - select

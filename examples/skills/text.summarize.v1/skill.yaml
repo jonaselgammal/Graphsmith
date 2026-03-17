@@ -1,0 +1,26 @@
+id: text.summarize.v1
+name: Summarize Text
+version: 1.0.0
+description: Summarize a text into a short paragraph.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+  - name: max_sentences
+    type: integer
+    required: false
+
+outputs:
+  - name: summary
+    type: string
+
+effects:
+  - llm_inference
+
+dependencies:
+  - llm.generate
+
+tags:
+  - text
+  - summarization

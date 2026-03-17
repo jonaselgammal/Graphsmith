@@ -1,0 +1,6 @@
+examples:
+  - name: graph_memory
+    input:
+      query: "graph memory for llm agents"
+    expected_output:
+      review: "A compact review of several relevant papers."

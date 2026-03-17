@@ -1,0 +1,6 @@
+examples:
+  - name: keyword_list
+    input:
+      lines: "AI agents, software engineering, automation"
+    expected_output:
+      joined: "Keywords:\nAI agents, software engineering, automation"

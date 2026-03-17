@@ -1,0 +1,27 @@
+version: 1
+
+nodes:
+  - id: search
+    op: skill.invoke
+    config:
+      skill_id: search.arxiv.v1
+
+  - id: summarize
+    op: parallel.map
+    config:
+      item_source: search.results
+      item_skill: paper.summarize.v1
+
+  - id: aggregate
+    op: skill.invoke
+    config:
+      skill_id: aggregate.bullets.v1
+
+edges:
+  - from: input.query
+    to: search.query
+  - from: summarize.results
+    to: aggregate.items
+
+outputs:
+  review: aggregate.text

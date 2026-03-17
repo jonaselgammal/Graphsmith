@@ -1,0 +1,12 @@
+version: 1
+
+nodes:
+  - id: clean
+    op: text.normalize
+
+edges:
+  - from: input.text
+    to: clean.text
+
+outputs:
+  normalized: clean.normalized

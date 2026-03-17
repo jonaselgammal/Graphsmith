@@ -1,0 +1,27 @@
+id: literature.quick_review.v1
+name: Quick Literature Review
+version: 1.0.0
+description: Search papers, summarize them, and aggregate findings.
+
+inputs:
+  - name: query
+    type: string
+    required: true
+
+outputs:
+  - name: review
+    type: string
+
+effects:
+  - network_read
+  - llm_inference
+
+dependencies:
+  - search.arxiv.v1
+  - paper.summarize.v1
+  - aggregate.bullets.v1
+
+tags:
+  - literature
+  - papers
+  - review

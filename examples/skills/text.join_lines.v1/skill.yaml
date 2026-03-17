@@ -1,0 +1,22 @@
+id: text.join_lines.v1
+name: Join Lines
+version: 1.0.0
+description: Format text content using a bullet-point template.
+
+inputs:
+  - name: lines
+    type: string
+    required: true
+    description: The text content to format.
+
+outputs:
+  - name: joined
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - join
+  - formatting

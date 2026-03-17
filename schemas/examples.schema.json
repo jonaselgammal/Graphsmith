@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "ExampleCase": {
+      "description": "One example input/output pair.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "input": {
+          "additionalProperties": true,
+          "title": "Input",
+          "type": "object"
+        },
+        "expected_output": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Output"
+        }
+      },
+      "required": [
+        "name",
+        "input"
+      ],
+      "title": "ExampleCase",
+      "type": "object"
+    }
+  },
+  "description": "Examples file model.",
+  "properties": {
+    "examples": {
+      "items": {
+        "$ref": "#/$defs/ExampleCase"
+      },
+      "title": "Examples",
+      "type": "array"
+    }
+  },
+  "title": "ExamplesFile",
+  "type": "object"
+}

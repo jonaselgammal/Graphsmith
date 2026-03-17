@@ -1,0 +1,7 @@
+examples:
+  - name: short_text
+    input:
+      text: "Cats sleep a lot but are also agile hunters."
+      max_sentences: 1
+    expected_output:
+      summary: "Cats sleep often and remain agile hunters."

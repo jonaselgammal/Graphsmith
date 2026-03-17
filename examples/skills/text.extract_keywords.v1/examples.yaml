@@ -1,0 +1,13 @@
+examples:
+  - name: tech_text
+    input:
+      text: "Machine learning models can process natural language efficiently."
+    expected_output:
+      keywords: "machine learning, natural language, models"
+    # Note: with --mock-llm, keywords will contain the echoed prompt.
+    # With a real LLM provider, keywords will be a comma-separated list.
+  - name: ai_agents
+    input:
+      text: "AI agents are transforming software engineering through automation."
+    expected_output:
+      keywords: "AI agents, software engineering, automation"

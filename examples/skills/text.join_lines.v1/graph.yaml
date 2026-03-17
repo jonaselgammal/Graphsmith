@@ -1,0 +1,14 @@
+version: 1
+
+nodes:
+  - id: format
+    op: template.render
+    config:
+      template: "Keywords:\n{{lines}}"
+
+edges:
+  - from: input.lines
+    to: format.lines
+
+outputs:
+  joined: format.rendered

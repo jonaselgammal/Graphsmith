@@ -1,0 +1,21 @@
+version: 1
+
+nodes:
+  - id: prompt
+    op: template.render
+    config:
+      template: "Summarize the following text in {{max_sentences}} sentences:\n{{text}}"
+
+  - id: summarize
+    op: llm.generate
+    inputs:
+      prompt: prompt.rendered
+
+edges:
+  - from: input.text
+    to: prompt.text
+  - from: input.max_sentences
+    to: prompt.max_sentences
+
+outputs:
+  summary: summarize.text

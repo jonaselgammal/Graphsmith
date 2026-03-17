@@ -1,0 +1,19 @@
+version: 1
+
+nodes:
+  - id: parse
+    op: json.parse
+
+  - id: pick
+    op: select.fields
+    config:
+      fields: ["name", "value"]
+    inputs:
+      data: parse.parsed
+
+edges:
+  - from: input.raw_json
+    to: parse.text
+
+outputs:
+  selected: pick.selected
