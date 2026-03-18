@@ -1,0 +1,1 @@
+{"goal":"Clean up this text","expected_skills":["text.normalize.v1"],"expected_output_names":["normalized"],"min_nodes":1}

@@ -1,0 +1,1 @@
+{"goal":"Clean up this text and then give me a summary","expected_skills":["text.normalize.v1","text.summarize.v1"],"acceptable_output_names":[["summary","summarized","result"]],"min_nodes":2,"required_effects":["llm_inference"]}

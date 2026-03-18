@@ -1,0 +1,1 @@
+{"goal":"Extract the name and value from this JSON","expected_skills":["json.reshape.v1"],"acceptable_output_names":[["selected","result","extracted"]],"min_nodes":1}

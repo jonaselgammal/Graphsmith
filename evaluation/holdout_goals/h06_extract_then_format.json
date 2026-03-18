@@ -1,0 +1,1 @@
+{"goal":"Pull out the keywords and present them formatted","expected_skills":["text.extract_keywords.v1","text.join_lines.v1"],"acceptable_output_names":[["joined","formatted","result","keywords_list"]],"min_nodes":2,"required_effects":["llm_inference"]}

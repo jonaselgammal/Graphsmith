@@ -1,0 +1,1 @@
+{"goal":"Find the key topics in this text","expected_skills":["text.extract_keywords.v1"],"expected_output_names":["keywords"],"min_nodes":1,"required_effects":["llm_inference"]}

@@ -1,0 +1,1 @@
+{"goal":"Take this text, clean it up, extract the important keywords, and format them as a readable list","expected_skills":["text.normalize.v1","text.extract_keywords.v1","text.join_lines.v1"],"acceptable_output_names":[["joined","formatted","result"]],"min_nodes":3,"required_effects":["llm_inference"]}

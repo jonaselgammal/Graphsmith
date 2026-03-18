@@ -1,0 +1,1 @@
+{"goal":"Clean this text, then get both a summary and keywords","expected_skills":["text.normalize.v1","text.summarize.v1","text.extract_keywords.v1"],"expected_output_names":["summary","keywords"],"min_nodes":3,"required_effects":["llm_inference"]}

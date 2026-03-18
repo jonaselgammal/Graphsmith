@@ -1,0 +1,1 @@
+{"goal":"Condense this text into a brief summary","expected_skills":["text.summarize.v1"],"acceptable_output_names":[["summary","condensed","result"]],"min_nodes":1,"required_effects":["llm_inference"]}

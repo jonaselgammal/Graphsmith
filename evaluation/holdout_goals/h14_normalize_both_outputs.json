@@ -1,0 +1,1 @@
+{"goal":"Normalize this text and also summarize it, I want both results","expected_skills":["text.normalize.v1","text.summarize.v1"],"expected_output_names":["normalized","summary"],"min_nodes":2,"required_effects":["llm_inference"]}

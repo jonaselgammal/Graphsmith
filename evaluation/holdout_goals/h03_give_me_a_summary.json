@@ -1,0 +1,1 @@
+{"goal":"Give me a short summary of this text","expected_skills":["text.summarize.v1"],"expected_output_names":["summary"],"min_nodes":1,"required_effects":["llm_inference"]}

@@ -1,0 +1,1 @@
+{"goal":"Make a bullet list of the keywords from this text","expected_skills":["text.extract_keywords.v1","text.join_lines.v1"],"acceptable_output_names":[["joined","formatted","result","bullet_list"]],"min_nodes":2,"required_effects":["llm_inference"]}
