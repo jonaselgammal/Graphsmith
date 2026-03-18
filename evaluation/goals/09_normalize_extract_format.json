@@ -1,0 +1,7 @@
+{
+  "goal": "Normalize text, extract keywords, and format them as a list",
+  "expected_skills": ["text.normalize.v1", "text.extract_keywords.v1", "text.join_lines.v1"],
+  "acceptable_output_names": [["joined", "formatted", "result", "formatted_keywords"]],
+  "min_nodes": 3,
+  "required_effects": ["llm_inference"]
+}

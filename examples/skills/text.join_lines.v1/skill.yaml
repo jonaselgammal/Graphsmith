@@ -1,13 +1,13 @@
 id: text.join_lines.v1
 name: Join Lines
 version: 1.0.0
-description: Format text content using a bullet-point template.
+description: Post-process and format text output from other skills with a "Keywords:" header. Use as a terminal formatting step after extraction or summarization.
 
 inputs:
   - name: lines
     type: string
     required: true
-    description: The text content to format.
+    description: Text to format (typically output from another skill).
 
 outputs:
   - name: joined

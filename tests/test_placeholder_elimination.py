@@ -99,8 +99,8 @@ class TestPromptNoPlaceholders:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
         assert '"OP_NAME"' not in ctx
 
-    def test_prompt_version_v3(self) -> None:
-        assert PROMPT_VERSION == "v3"
+    def test_prompt_version_v4(self) -> None:
+        assert PROMPT_VERSION == "v4"
 
     def test_prompt_has_concrete_examples(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))

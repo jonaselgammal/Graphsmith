@@ -7,7 +7,7 @@ from __future__ import annotations
 from graphsmith.constants import PRIMITIVE_OPS
 from graphsmith.planner.models import PlanRequest
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 _SYSTEM_MESSAGE = (
     "You are a Graphsmith graph planner. "
@@ -82,7 +82,30 @@ Only "summary" is the deliverable the user asked for.
 }
 ```
 
-## Example 3: partial plan with holes
+## Example 3: extraction → formatting chain
+
+Goal: "Extract keywords and format them as a list"
+Chain: extract_keywords produces raw keywords, then join_lines formats them.
+The final output uses the formatting skill's port name.
+
+```json
+{
+  "inputs": [{"name": "text", "type": "string"}],
+  "outputs": [{"name": "joined", "type": "string"}],
+  "nodes": [
+    {"id": "extract", "op": "skill.invoke", "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}},
+    {"id": "format", "op": "skill.invoke", "config": {"skill_id": "text.join_lines.v1", "version": "1.0.0"}}
+  ],
+  "edges": [
+    {"from": "input.text", "to": "extract.text"},
+    {"from": "extract.keywords", "to": "format.lines"}
+  ],
+  "graph_outputs": {"joined": "format.joined"},
+  "effects": ["llm_inference"]
+}
+```
+
+## Example 4: partial plan with holes
 
 ```json
 {
@@ -143,9 +166,12 @@ def build_planning_context(request: PlanRequest) -> str:
             ins = ", ".join(ins_parts) or "(none)"
             outs = ", ".join(entry.output_names) or "(none)"
             effs = ", ".join(entry.effects) or "pure"
+            tags = ", ".join(entry.tags) if entry.tags else ""
+            tag_line = f"  tags: [{tags}]" if tags else ""
             lines.append(
                 f"- {entry.id}@{entry.version}: {entry.description}\n"
                 f"  inputs: [{ins}]  outputs: [{outs}]  effects: [{effs}]"
+                + (f"\n{tag_line}" if tag_line else "")
             )
         lines.append("")
 

@@ -719,6 +719,47 @@ def promote_candidates(
         typer.echo()
 
 
+# ── show-plan / render-plan ───────────────────────────────────────────
+
+
+@app.command("show-plan")
+def show_plan_cmd(
+    path: str = typer.Argument(help="Path to a saved plan JSON file."),
+) -> None:
+    """Show a saved plan in human-readable format."""
+    from graphsmith.planner import load_plan
+    from graphsmith.planner.render import render_plan_text
+
+    try:
+        glue = load_plan(path)
+    except PlannerError as exc:
+        typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(render_plan_text(glue))
+
+
+@app.command("render-plan")
+def render_plan_cmd(
+    path: str = typer.Argument(help="Path to a saved plan JSON file."),
+    fmt: str = typer.Option("mermaid", "--format", help="Output format: mermaid or text."),
+) -> None:
+    """Render a saved plan as a Mermaid diagram or text."""
+    from graphsmith.planner import load_plan
+    from graphsmith.planner.render import render_plan_mermaid, render_plan_text
+
+    try:
+        glue = load_plan(path)
+    except PlannerError as exc:
+        typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if fmt == "mermaid":
+        typer.echo(render_plan_mermaid(glue))
+    else:
+        typer.echo(render_plan_text(glue))
+
+
 # ── eval-planner ─────────────────────────────────────────────────────
 
 
