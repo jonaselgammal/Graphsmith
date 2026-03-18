@@ -38,25 +38,21 @@ graphsmith eval-planner --goals evaluation/challenge_goals --registry "$REG" \
   --backend llm --provider anthropic --model claude-haiku-4-5-20251001
 ```
 
-## Running all three
+## Running evaluations via scripts
+
+The easiest way to run evaluations. Pass provider flags as arguments:
 
 ```bash
-REG=$(mktemp -d)
-for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG" 2>/dev/null; done
+# All three sets at once
+scripts/eval_all.sh --backend llm --provider anthropic --model claude-haiku-4-5-20251001
 
-echo "=== Benchmark v1 ==="
-graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
-  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+# Individual sets
+scripts/eval_benchmark.sh --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+scripts/eval_holdout.sh --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+scripts/eval_challenge.sh --backend llm --provider anthropic --model claude-haiku-4-5-20251001
 
-echo "=== Holdout ==="
-graphsmith eval-planner --goals evaluation/holdout_goals --registry "$REG" \
-  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
-
-echo "=== Challenge ==="
-graphsmith eval-planner --goals evaluation/challenge_goals --registry "$REG" \
-  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
-
-rm -rf "$REG"
+# With mock planner (no API key needed)
+scripts/eval_all.sh
 ```
 
 ## Goal format

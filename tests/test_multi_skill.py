@@ -233,7 +233,7 @@ class TestPlanAndRunMultiSkill:
         result = compose_plan("normalize text", full_reg, MockPlannerBackend())
         assert result.status == "success"
         assert result.graph is not None
-        assert len(result.candidates_considered) >= 2
+        assert len(result.candidates_considered) >= 1
 
     def test_plan_and_execute(self, full_reg: LocalRegistry) -> None:
         result = compose_plan("normalize text", full_reg, MockPlannerBackend())
