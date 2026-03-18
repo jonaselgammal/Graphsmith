@@ -7,7 +7,7 @@ from __future__ import annotations
 from graphsmith.constants import PRIMITIVE_OPS
 from graphsmith.planner.models import PlanRequest
 
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 _SYSTEM_MESSAGE = (
     "You are a Graphsmith graph planner. "
@@ -33,6 +33,13 @@ Rules:
   If the goal says "normalize and THEN summarize", only summary is requested —
   normalized is just a step toward it and should stay internal.
   Key test: does the goal name this result as something the user wants back?
+- Recognize paraphrases of skill actions as output requests:
+  "tidy up" / "clean" = normalize (output: normalized)
+  "find topics" / "list keywords" = extract keywords (output: keywords)
+  "write a summary" / "condense" = summarize (output: summary)
+  If the goal mentions an action by ANY name, the result is a requested deliverable.
+- When the goal lists multiple actions with "and" or commas ("X, Y, and Z"),
+  each action names a deliverable the user wants back.
 - Name each output using the output port name of the skill that produces it
   (e.g. if text.normalize.v1 outputs "normalized", name the graph output "normalized").
 
@@ -101,6 +108,31 @@ The user wants BOTH the normalized text AND the keywords. Expose both.
     {"from": "normalize.normalized", "to": "extract.text"}
   ],
   "graph_outputs": {"normalized": "normalize.normalized", "keywords": "extract.keywords"},
+  "effects": ["llm_inference"]
+}
+```
+
+## Example 2c: paraphrased multi-output — same as 2b with different wording
+
+Goal: "Clean the text, write a summary, and list the keywords"
+"Clean" = normalize, "write a summary" = summarize, "list keywords" = extract keywords.
+The user wants summary AND keywords. Normalization is a step — hide it.
+
+```json
+{
+  "inputs": [{"name": "text", "type": "string"}],
+  "outputs": [{"name": "summary", "type": "string"}, {"name": "keywords", "type": "string"}],
+  "nodes": [
+    {"id": "normalize", "op": "skill.invoke", "config": {"skill_id": "text.normalize.v1", "version": "1.0.0"}},
+    {"id": "summarize", "op": "skill.invoke", "config": {"skill_id": "text.summarize.v1", "version": "1.0.0"}},
+    {"id": "extract", "op": "skill.invoke", "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}}
+  ],
+  "edges": [
+    {"from": "input.text", "to": "normalize.text"},
+    {"from": "normalize.normalized", "to": "summarize.text"},
+    {"from": "normalize.normalized", "to": "extract.text"}
+  ],
+  "graph_outputs": {"summary": "summarize.summary", "keywords": "extract.keywords"},
   "effects": ["llm_inference"]
 }
 ```
