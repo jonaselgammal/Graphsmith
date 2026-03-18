@@ -719,6 +719,43 @@ def promote_candidates(
         typer.echo()
 
 
+# ── ui ───────────────────────────────────────────────────────────────
+
+
+@app.command()
+def ui(
+    port: int = typer.Option(8741, "--port", help="Local server port."),
+) -> None:
+    """Launch the local plan inspector UI in your browser."""
+    import http.server
+    import threading
+    import webbrowser
+
+    ui_dir = Path(__file__).resolve().parent.parent.parent / "ui"
+    if not (ui_dir / "index.html").exists():
+        typer.secho("FAIL: ui/index.html not found.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, directory=str(ui_dir), **kwargs)
+        def log_message(self, fmt: str, *args: Any) -> None:
+            pass  # suppress request logs
+
+    url = f"http://localhost:{port}"
+    typer.echo(f"Graphsmith Inspector running at {url}")
+    typer.echo("Press Ctrl+C to stop.\n")
+    typer.echo(f"Open a plan: drag a JSON file onto the page, or use the file picker.")
+
+    server = http.server.HTTPServer(("localhost", port), Handler)
+    threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        typer.echo("\nStopped.")
+        server.shutdown()
+
+
 # ── show-plan / render-plan ───────────────────────────────────────────
 
 

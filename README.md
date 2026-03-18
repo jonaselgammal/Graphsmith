@@ -180,6 +180,21 @@ graphsmith run examples/skills/text.summarize.v1 \
   --input '{"text":"Cats sleep a lot","max_sentences":2}' --mock-llm
 ```
 
+## Visual plan inspector
+
+```bash
+# Launch the local inspector UI
+graphsmith ui
+
+# Or inspect a plan from the command line
+graphsmith show-plan examples/plans/normalize_extract_keywords.json
+graphsmith render-plan examples/plans/normalize_extract_keywords.json --format mermaid
+```
+
+The inspector opens in your browser. Drag a saved plan JSON onto the page
+to see its graph: nodes, edges, inputs, outputs. Click nodes for details.
+Export to Mermaid for docs. No network access — everything runs locally.
+
 ## LLM providers
 
 ```bash
@@ -233,6 +248,10 @@ See [example workflows](docs/EXAMPLE_WORKFLOWS.md) for end-to-end usage.
 | `traces-show <id>` | Show/summarize a trace |
 | `traces-prune` | Remove old traces |
 | `promote-candidates` | Find repeated patterns |
+| `show-plan <path>` | Show plan details (text) |
+| `render-plan <path>` | Render plan as Mermaid |
+| `ui` | Launch visual plan inspector |
+| `eval-planner` | Evaluate planner quality |
 
 ## Current limitations
 
