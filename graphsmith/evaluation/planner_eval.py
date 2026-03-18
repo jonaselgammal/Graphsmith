@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field
 
 from graphsmith.exceptions import ValidationError
 from graphsmith.planner.backend import PlannerBackend
-from graphsmith.planner.composer import compose_plan, glue_to_skill_package
+from graphsmith.planner.candidates import (
+    RETRIEVAL_MODES,
+    RetrievalDiagnostics,
+    retrieve_candidates_with_diagnostics,
+)
+from graphsmith.planner.composer import glue_to_skill_package
 from graphsmith.planner.models import PlanResult
 from graphsmith.registry.local import LocalRegistry
 from graphsmith.validator import validate_skill_package
@@ -43,12 +48,14 @@ class EvalResult(BaseModel):
     """Evaluation result for one goal."""
 
     goal: str
-    status: str = "fail"  # "pass", "partial", "fail"
+    status: str = "fail"
     checks: EvalChecks = Field(default_factory=EvalChecks)
     score: float = 0.0
     plan_status: str = ""
     holes: list[str] = Field(default_factory=list)
     error: str = ""
+    retrieval: RetrievalDiagnostics | None = None
+    expected_skills_in_shortlist: bool = False
 
 
 class EvalReport(BaseModel):
@@ -56,10 +63,12 @@ class EvalReport(BaseModel):
 
     provider: str = ""
     model: str = ""
+    retrieval_mode: str = "ranked"
     timestamp: str = ""
     goals_total: int = 0
     goals_passed: int = 0
     pass_rate: float = 0.0
+    avg_candidates: float = 0.0
     results: list[EvalResult] = Field(default_factory=list)
 
 
@@ -77,14 +86,41 @@ def evaluate_goal(
     eval_goal: EvalGoal,
     registry: LocalRegistry,
     backend: PlannerBackend,
+    *,
+    retrieval_mode: str = "ranked",
 ) -> EvalResult:
-    """Evaluate the planner on a single goal."""
+    """Evaluate the planner on a single goal with retrieval diagnostics."""
+    from graphsmith.planner.composer import _validate_glue_graph
+    from graphsmith.planner.models import PlanRequest, PlanResult as PR
+
     checks = EvalChecks()
     result_obj = EvalResult(goal=eval_goal.goal)
 
-    # 1. Plan
+    # 1. Retrieve candidates with diagnostics
+    diag, candidates = retrieve_candidates_with_diagnostics(
+        eval_goal.goal, registry, mode=retrieval_mode,
+    )
+    result_obj.retrieval = diag
+
+    # Check if expected skills are in shortlist
+    cand_ids = {c.id for c in candidates}
+    if eval_goal.expected_skills:
+        result_obj.expected_skills_in_shortlist = all(
+            s in cand_ids for s in eval_goal.expected_skills
+        )
+    else:
+        result_obj.expected_skills_in_shortlist = True
+
+    # 2. Plan using the retrieved candidates
+    request = PlanRequest(goal=eval_goal.goal, candidates=candidates)
     try:
-        plan_result = compose_plan(eval_goal.goal, registry, backend)
+        plan_result = backend.compose(request)
+        plan_result.candidates_considered = [
+            f"{c.id}@{c.version}" for c in candidates
+        ]
+        # Validate if graph present
+        if plan_result.graph is not None:
+            plan_result = _validate_glue_graph(plan_result)
     except Exception as exc:
         result_obj.error = str(exc)
         result_obj.status = "fail"
@@ -93,10 +129,8 @@ def evaluate_goal(
     result_obj.plan_status = plan_result.status
     result_obj.holes = [h.description for h in plan_result.holes]
 
-    # 2. Check: parsed
+    # 3. Checks
     checks.parsed = plan_result.status != "failure"
-
-    # 3. Check: has_graph
     checks.has_graph = plan_result.graph is not None
 
     if not checks.has_graph:
@@ -107,7 +141,6 @@ def evaluate_goal(
 
     graph = plan_result.graph
 
-    # 4. Check: validates
     try:
         pkg = glue_to_skill_package(graph)
         validate_skill_package(pkg)
@@ -115,7 +148,6 @@ def evaluate_goal(
     except (ValidationError, Exception) as exc:
         result_obj.error = str(exc)
 
-    # 5. Check: correct_skills
     node_skills = set()
     for node in graph.graph.nodes:
         sid = node.config.get("skill_id", "")
@@ -128,10 +160,8 @@ def evaluate_goal(
     else:
         checks.correct_skills = True
 
-    # 6. Check: correct_outputs
     mapped_outputs = set(graph.graph.outputs.keys())
     if eval_goal.acceptable_output_names:
-        # Each slot has a list of acceptable names; at least one must match
         checks.correct_outputs = all(
             any(name in mapped_outputs for name in alternatives)
             for alternatives in eval_goal.acceptable_output_names
@@ -143,15 +173,16 @@ def evaluate_goal(
     else:
         checks.correct_outputs = True
 
-    # 7. Check: min_nodes
     checks.min_nodes_met = len(graph.graph.nodes) >= eval_goal.min_nodes
-
-    # 8. Check: no_holes
     checks.no_holes = len(plan_result.holes) == 0
 
     result_obj.checks = checks
     result_obj.score = _score(checks)
-    result_obj.status = "pass" if result_obj.score == 1.0 else "partial" if result_obj.score > 0 else "fail"
+    result_obj.status = (
+        "pass" if result_obj.score == 1.0
+        else "partial" if result_obj.score > 0
+        else "fail"
+    )
     return result_obj
 
 
@@ -162,36 +193,60 @@ def run_evaluation(
     *,
     provider_name: str = "",
     model_name: str = "",
+    retrieval_mode: str = "ranked",
 ) -> EvalReport:
     """Run evaluation across all goals and produce a report."""
     results: list[EvalResult] = []
     for g in goals:
-        r = evaluate_goal(g, registry, backend)
+        r = evaluate_goal(g, registry, backend, retrieval_mode=retrieval_mode)
         results.append(r)
 
     passed = sum(1 for r in results if r.status == "pass")
     total = len(results)
+    avg_cands = (
+        sum(r.retrieval.candidate_count for r in results if r.retrieval) / total
+        if total > 0 else 0.0
+    )
 
     return EvalReport(
         provider=provider_name,
         model=model_name,
+        retrieval_mode=retrieval_mode,
         timestamp=datetime.now(timezone.utc).isoformat(),
         goals_total=total,
         goals_passed=passed,
         pass_rate=passed / total if total > 0 else 0.0,
+        avg_candidates=round(avg_cands, 1),
         results=results,
     )
 
 
+def compare_retrieval_modes(
+    goals: list[EvalGoal],
+    registry: LocalRegistry,
+    backend: PlannerBackend,
+    *,
+    provider_name: str = "",
+    model_name: str = "",
+    modes: list[str] | None = None,
+) -> dict[str, EvalReport]:
+    """Run evaluation across multiple retrieval modes for comparison."""
+    modes = modes or list(RETRIEVAL_MODES)
+    reports: dict[str, EvalReport] = {}
+    for mode in modes:
+        reports[mode] = run_evaluation(
+            goals, registry, backend,
+            provider_name=provider_name,
+            model_name=model_name,
+            retrieval_mode=mode,
+        )
+    return reports
+
+
 def _score(checks: EvalChecks) -> float:
-    """Compute score as fraction of passed checks."""
     fields = [
-        checks.parsed,
-        checks.has_graph,
-        checks.validates,
-        checks.correct_skills,
-        checks.correct_outputs,
-        checks.min_nodes_met,
-        checks.no_holes,
+        checks.parsed, checks.has_graph, checks.validates,
+        checks.correct_skills, checks.correct_outputs,
+        checks.min_nodes_met, checks.no_holes,
     ]
     return sum(fields) / len(fields)

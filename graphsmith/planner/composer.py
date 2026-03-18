@@ -30,7 +30,7 @@ def compose_plan(
     *,
     constraints: list[str] | None = None,
     desired_outputs: list[IOField] | None = None,
-    max_candidates: int = 20,
+    max_candidates: int = 8,
 ) -> PlanResult:
     """End-to-end planning: retrieve → compose → validate.
 

@@ -819,9 +819,12 @@ def eval_planner(
         help="Save results JSON to this path.",
     ),
     output_format: str = typer.Option("text", "--output-format", help="text or json."),
+    retrieval_mode: str = typer.Option("ranked", "--retrieval-mode", help="Retrieval mode: ranked, broad, ranked_broad."),
+    save_diagnostics: Optional[str] = typer.Option(None, "--save-diagnostics", help="Save per-goal diagnostics JSON."),
+    compare_retrieval: bool = typer.Option(False, "--compare-retrieval", help="Compare all retrieval modes."),
 ) -> None:
     """Evaluate planner quality against a set of known goals."""
-    from graphsmith.evaluation.planner_eval import load_goals, run_evaluation
+    from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
     from graphsmith.registry import LocalRegistry
 
     reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
@@ -834,10 +837,31 @@ def eval_planner(
         typer.secho("No goal files found.", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
 
+    prov_name = provider if backend == "llm" else "mock"
+    mod_name = model or ""
+
+    if compare_retrieval:
+        reports = compare_retrieval_modes(
+            goals, reg, planner_backend,
+            provider_name=prov_name, model_name=mod_name,
+        )
+        if save_results:
+            Path(save_results).write_text(
+                json.dumps({m: r.model_dump() for m, r in reports.items()}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            typer.secho(f"Comparison saved: {save_results}", fg=typer.colors.CYAN, err=True)
+
+        typer.echo(f"Retrieval Mode Comparison ({prov_name} {mod_name})")
+        typer.echo("=" * 60)
+        for mode, report in reports.items():
+            typer.echo(f"  {mode:15s}  pass: {report.goals_passed}/{report.goals_total} = {report.pass_rate:.0%}  avg_cands: {report.avg_candidates}")
+        return
+
     report = run_evaluation(
         goals, reg, planner_backend,
-        provider_name=provider if backend == "llm" else "mock",
-        model_name=model or "",
+        provider_name=prov_name, model_name=mod_name,
+        retrieval_mode=retrieval_mode,
     )
 
     if save_results:
@@ -846,19 +870,40 @@ def eval_planner(
         )
         typer.secho(f"Results saved: {save_results}", fg=typer.colors.CYAN, err=True)
 
+    if save_diagnostics:
+        diags = []
+        for r in report.results:
+            d: dict[str, Any] = {
+                "goal": r.goal, "status": r.status,
+                "expected_in_shortlist": r.expected_skills_in_shortlist,
+            }
+            if r.retrieval:
+                d["retrieval"] = r.retrieval.model_dump()
+            if r.status != "pass":
+                d["error"] = r.error
+                d["holes"] = r.holes
+                d["checks"] = r.checks.model_dump()
+            diags.append(d)
+        Path(save_diagnostics).write_text(
+            json.dumps(diags, indent=2) + "\n", encoding="utf-8",
+        )
+        typer.secho(f"Diagnostics saved: {save_diagnostics}", fg=typer.colors.CYAN, err=True)
+
     if output_format == "json":
         typer.echo(json.dumps(report.model_dump(), indent=2))
         return
 
     # Text output
-    typer.echo(f"Planner Evaluation ({report.provider} {report.model})")
-    typer.echo(f"{'=' * 50}")
+    typer.echo(f"Planner Evaluation ({report.provider} {report.model}) [{report.retrieval_mode}]")
+    typer.echo(f"{'=' * 60}")
     typer.echo(f"Goals: {report.goals_total}  Passed: {report.goals_passed}  "
-               f"Rate: {report.pass_rate:.0%}\n")
+               f"Rate: {report.pass_rate:.0%}  Avg candidates: {report.avg_candidates}\n")
 
     for r in report.results:
         icon = "pass" if r.status == "pass" else "PARTIAL" if r.status == "partial" else "FAIL"
-        typer.echo(f"  [{icon}] {r.goal}  (score: {r.score:.2f})")
+        shortlist_ok = "Y" if r.expected_skills_in_shortlist else "N"
+        cand_count = r.retrieval.candidate_count if r.retrieval else "?"
+        typer.echo(f"  [{icon}] {r.goal}  (score: {r.score:.2f}, cands: {cand_count}, expected_in_list: {shortlist_ok})")
         if r.status != "pass":
             c = r.checks
             fails = []
@@ -877,8 +922,10 @@ def eval_planner(
             if not c.no_holes:
                 fails.append("has holes")
             typer.echo(f"         issues: {', '.join(fails)}")
+            if r.retrieval:
+                typer.echo(f"         shortlist: {r.retrieval.candidates}")
             if r.error:
-                typer.echo(f"         error: {r.error[:120]}")
+                typer.echo(f"         error: {r.error[:150]}")
 
 
 # ── helpers ──────────────────────────────────────────────────────────
