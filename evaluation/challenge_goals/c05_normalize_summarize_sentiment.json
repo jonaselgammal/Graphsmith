@@ -1,0 +1,1 @@
+{"goal":"Normalize the text, summarize it, and classify its sentiment","expected_skills":["text.normalize.v1","text.summarize.v1","text.classify_sentiment.v1"],"expected_output_names":["summary","sentiment"],"min_nodes":3,"required_effects":["llm_inference"]}

@@ -1,0 +1,12 @@
+version: 1
+
+nodes:
+  - id: sorter
+    op: text.sort_lines
+
+edges:
+  - from: input.text
+    to: sorter.text
+
+outputs:
+  sorted: sorter.sorted

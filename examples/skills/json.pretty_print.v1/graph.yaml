@@ -1,0 +1,14 @@
+version: 1
+
+nodes:
+  - id: fmt
+    op: template.render
+    config:
+      template: "{{raw_json}}"
+
+edges:
+  - from: input.raw_json
+    to: fmt.raw_json
+
+outputs:
+  formatted: fmt.rendered

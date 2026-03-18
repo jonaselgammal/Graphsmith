@@ -1,0 +1,1 @@
+{"goal":"Extract keywords from this text and add a header saying Results","expected_skills":["text.extract_keywords.v1","text.prefix_lines.v1"],"acceptable_output_names":[["prefixed","formatted","result"]],"min_nodes":2,"required_effects":["llm_inference"]}

@@ -1,0 +1,21 @@
+id: text.sort_lines.v1
+name: Sort Lines
+version: 1.0.0
+description: Sort lines of text alphabetically. Useful for ordering list items.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: sorted
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - transform
+  - sort

@@ -1,0 +1,1 @@
+{"goal":"How many words are in this text","expected_skills":["text.word_count.v1"],"acceptable_output_names":[["count","word_count","result"]],"min_nodes":1}

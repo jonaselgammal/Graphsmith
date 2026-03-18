@@ -1,0 +1,1 @@
+{"goal":"Normalize text, extract keywords, and count the words in the original","expected_skills":["text.normalize.v1","text.extract_keywords.v1","text.word_count.v1"],"expected_output_names":["keywords","count"],"min_nodes":3,"required_effects":["llm_inference"]}

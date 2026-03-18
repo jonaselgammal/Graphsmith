@@ -1,0 +1,21 @@
+id: json.pretty_print.v1
+name: Pretty Print JSON
+version: 1.0.0
+description: Format a JSON string with indentation for readability. Cosmetic formatting only.
+
+inputs:
+  - name: raw_json
+    type: string
+    required: true
+
+outputs:
+  - name: formatted
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - json
+  - formatting
+  - pretty

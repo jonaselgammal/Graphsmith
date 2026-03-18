@@ -1,0 +1,16 @@
+version: 1
+
+nodes:
+  - id: fmt
+    op: template.render
+    config:
+      template: "{{prefix}}\n{{text}}"
+
+edges:
+  - from: input.text
+    to: fmt.text
+  - from: input.prefix
+    to: fmt.prefix
+
+outputs:
+  prefixed: fmt.rendered

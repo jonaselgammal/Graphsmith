@@ -1,0 +1,1 @@
+{"goal":"Make each word start with a capital letter","expected_skills":["text.title_case.v1"],"acceptable_output_names":[["titled","result","capitalized"]],"min_nodes":1}

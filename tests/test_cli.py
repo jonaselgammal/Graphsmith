@@ -540,9 +540,11 @@ def test_list_ops() -> None:
     result = runner.invoke(app, ["list-ops"])
     assert result.exit_code == 0
     lines = result.output.strip().split("\n")
-    assert len(lines) == 13
+    assert len(lines) == 18
     assert "template.render" in result.output
     assert "text.normalize" in result.output
+    assert "text.word_count" in result.output
+    assert "text.reverse" in result.output
     assert "skill.invoke" in result.output
     assert "llm.generate" in result.output
     # Should be sorted

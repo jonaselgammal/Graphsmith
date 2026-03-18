@@ -1,0 +1,21 @@
+id: json.extract_field.v1
+name: Extract JSON Field
+version: 1.0.0
+description: Parse a JSON string and extract the value field.
+
+inputs:
+  - name: raw_json
+    type: string
+    required: true
+
+outputs:
+  - name: value
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - json
+  - extract
+  - field

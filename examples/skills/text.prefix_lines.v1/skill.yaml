@@ -1,0 +1,24 @@
+id: text.prefix_lines.v1
+name: Prefix Lines
+version: 1.0.0
+description: Add a header prefix to text content. Use as a post-processing formatting step.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+  - name: prefix
+    type: string
+    required: true
+
+outputs:
+  - name: prefixed
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - formatting
+  - prefix

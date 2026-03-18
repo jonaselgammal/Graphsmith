@@ -1,0 +1,12 @@
+version: 1
+
+nodes:
+  - id: dedup
+    op: text.remove_duplicates
+
+edges:
+  - from: input.text
+    to: dedup.text
+
+outputs:
+  deduplicated: dedup.deduplicated

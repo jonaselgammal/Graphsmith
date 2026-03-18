@@ -1,0 +1,1 @@
+{"goal":"Clean up this text and capitalize each word","expected_skills":["text.normalize.v1","text.title_case.v1"],"expected_output_names":["titled"],"min_nodes":2}

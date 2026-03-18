@@ -14,7 +14,14 @@ from graphsmith.ops.llm_provider import LLMProvider, StubLLMProvider
 from graphsmith.ops.parallel_map import parallel_map
 from graphsmith.ops.select import select_fields
 from graphsmith.ops.template import template_render
-from graphsmith.ops.text_ops import text_normalize
+from graphsmith.ops.text_ops import (
+    text_normalize,
+    text_word_count,
+    text_reverse,
+    text_sort_lines,
+    text_remove_duplicates,
+    text_title_case,
+)
 
 # Ops that need no external provider
 _PURE_OPS: dict[str, Any] = {
@@ -27,6 +34,11 @@ _PURE_OPS: dict[str, Any] = {
     "array.map": array_map,
     "array.filter": array_filter,
     "text.normalize": text_normalize,
+    "text.word_count": text_word_count,
+    "text.reverse": text_reverse,
+    "text.sort_lines": text_sort_lines,
+    "text.remove_duplicates": text_remove_duplicates,
+    "text.title_case": text_title_case,
 }
 
 

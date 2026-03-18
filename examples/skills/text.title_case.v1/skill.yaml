@@ -1,0 +1,21 @@
+id: text.title_case.v1
+name: Title Case
+version: 1.0.0
+description: Capitalize the first letter of each word.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: titled
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - formatting
+  - capitalization

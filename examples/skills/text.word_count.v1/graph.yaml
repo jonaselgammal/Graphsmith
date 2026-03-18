@@ -1,0 +1,12 @@
+version: 1
+
+nodes:
+  - id: counter
+    op: text.word_count
+
+edges:
+  - from: input.text
+    to: counter.text
+
+outputs:
+  count: counter.count

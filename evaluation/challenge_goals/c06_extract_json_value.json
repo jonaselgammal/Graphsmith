@@ -1,0 +1,1 @@
+{"goal":"Parse this JSON and extract the value field","expected_skills":["json.extract_field.v1"],"acceptable_output_names":[["value","extracted","result"]],"min_nodes":1}

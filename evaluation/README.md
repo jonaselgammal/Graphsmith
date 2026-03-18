@@ -21,7 +21,24 @@ Use for generalisation measurement:
 graphsmith eval-planner --goals evaluation/holdout_goals --registry "$REG"
 ```
 
-## Running both
+## Challenge set (harder tasks with distractors)
+
+`evaluation/challenge_goals/` — 12 goals testing skill selection
+under distractor pressure. The registry now contains 15 skills
+including 4 distractors (reverse, sort_lines, remove_duplicates,
+pretty_print) that the planner must avoid selecting.
+
+Includes: cross-category composition, multi-output with new skills
+(word_count, title_case, sentiment), formatting chains with
+prefix_lines, and three-skill pipelines with non-obvious ordering.
+
+Use for stress testing:
+```bash
+graphsmith eval-planner --goals evaluation/challenge_goals --registry "$REG" \
+  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+```
+
+## Running all three
 
 ```bash
 REG=$(mktemp -d)
@@ -33,6 +50,10 @@ graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
 
 echo "=== Holdout ==="
 graphsmith eval-planner --goals evaluation/holdout_goals --registry "$REG" \
+  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+
+echo "=== Challenge ==="
+graphsmith eval-planner --goals evaluation/challenge_goals --registry "$REG" \
   --backend llm --provider anthropic --model claude-haiku-4-5-20251001
 
 rm -rf "$REG"

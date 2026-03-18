@@ -1,0 +1,6 @@
+examples:
+  - name: simple
+    input:
+      text: "banana\napple\ncherry"
+    expected_output:
+      sorted: "apple\nbanana\ncherry"

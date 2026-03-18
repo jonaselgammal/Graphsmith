@@ -1,0 +1,1 @@
+{"goal":"Clean up the text, pull out key topics, and format them with a header","expected_skills":["text.normalize.v1","text.extract_keywords.v1","text.prefix_lines.v1"],"acceptable_output_names":[["prefixed","formatted","result"]],"min_nodes":3,"required_effects":["llm_inference"]}

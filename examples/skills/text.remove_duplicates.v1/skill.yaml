@@ -1,0 +1,21 @@
+id: text.remove_duplicates.v1
+name: Remove Duplicates
+version: 1.0.0
+description: Remove duplicate lines from text, preserving order. Useful for deduplicating list items.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: deduplicated
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - transform
+  - dedup

@@ -1,0 +1,24 @@
+id: text.classify_sentiment.v1
+name: Classify Sentiment
+version: 1.0.0
+description: Classify the sentiment of text as positive, negative, or neutral using an LLM.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: sentiment
+    type: string
+
+effects:
+  - llm_inference
+
+dependencies:
+  - llm.generate
+
+tags:
+  - text
+  - sentiment
+  - analysis

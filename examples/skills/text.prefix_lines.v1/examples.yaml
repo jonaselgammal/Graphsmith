@@ -1,0 +1,7 @@
+examples:
+  - name: simple
+    input:
+      text: "hello"
+      prefix: "Results:"
+    expected_output:
+      prefixed: "Results:\nhello"

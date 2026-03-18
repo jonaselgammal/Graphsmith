@@ -1,0 +1,1 @@
+{"goal":"Summarize this text and tell me its sentiment","expected_skills":["text.summarize.v1","text.classify_sentiment.v1"],"expected_output_names":["summary","sentiment"],"min_nodes":2,"required_effects":["llm_inference"]}

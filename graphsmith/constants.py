@@ -14,6 +14,11 @@ PRIMITIVE_OPS = {
     "llm.extract",
     "skill.invoke",
     "text.normalize",
+    "text.word_count",
+    "text.reverse",
+    "text.sort_lines",
+    "text.remove_duplicates",
+    "text.title_case",
 }
 
 ALLOWED_TYPES: set[str] = {

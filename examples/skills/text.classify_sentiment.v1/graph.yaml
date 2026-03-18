@@ -1,0 +1,19 @@
+version: 1
+
+nodes:
+  - id: prompt
+    op: template.render
+    config:
+      template: "Classify the sentiment of this text as positive, negative, or neutral. Respond with one word only:\n{{text}}"
+
+  - id: classify
+    op: llm.generate
+    inputs:
+      prompt: prompt.rendered
+
+edges:
+  - from: input.text
+    to: prompt.text
+
+outputs:
+  sentiment: classify.text

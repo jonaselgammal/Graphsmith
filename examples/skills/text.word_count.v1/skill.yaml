@@ -1,0 +1,21 @@
+id: text.word_count.v1
+name: Word Count
+version: 1.0.0
+description: Count the number of words in text.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: count
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - analysis
+  - count

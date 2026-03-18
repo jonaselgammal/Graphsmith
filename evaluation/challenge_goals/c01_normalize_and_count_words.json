@@ -1,0 +1,1 @@
+{"goal":"Normalize this text and count the words","expected_skills":["text.normalize.v1","text.word_count.v1"],"expected_output_names":["normalized","count"],"min_nodes":2}

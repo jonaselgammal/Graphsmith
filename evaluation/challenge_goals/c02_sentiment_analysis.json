@@ -1,0 +1,1 @@
+{"goal":"Analyze the sentiment of this text","expected_skills":["text.classify_sentiment.v1"],"acceptable_output_names":[["sentiment","result","classification"]],"min_nodes":1,"required_effects":["llm_inference"]}

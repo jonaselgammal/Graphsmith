@@ -1,0 +1,6 @@
+examples:
+  - name: positive
+    input:
+      text: "I love this product!"
+    expected_output:
+      sentiment: "positive"
