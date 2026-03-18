@@ -22,6 +22,7 @@ class EvalGoal(BaseModel):
     goal: str
     expected_skills: list[str] = Field(default_factory=list)
     expected_output_names: list[str] = Field(default_factory=list)
+    acceptable_output_names: list[list[str]] = Field(default_factory=list)
     min_nodes: int = 1
     required_effects: list[str] = Field(default_factory=list)
 
@@ -129,7 +130,13 @@ def evaluate_goal(
 
     # 6. Check: correct_outputs
     mapped_outputs = set(graph.graph.outputs.keys())
-    if eval_goal.expected_output_names:
+    if eval_goal.acceptable_output_names:
+        # Each slot has a list of acceptable names; at least one must match
+        checks.correct_outputs = all(
+            any(name in mapped_outputs for name in alternatives)
+            for alternatives in eval_goal.acceptable_output_names
+        )
+    elif eval_goal.expected_output_names:
         checks.correct_outputs = all(
             name in mapped_outputs for name in eval_goal.expected_output_names
         )

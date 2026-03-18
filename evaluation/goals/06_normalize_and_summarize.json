@@ -1,7 +1,7 @@
 {
   "goal": "Normalize this text and then summarize it",
   "expected_skills": ["text.normalize.v1", "text.summarize.v1"],
-  "expected_output_names": ["summary"],
+  "acceptable_output_names": [["summary", "summarized", "summarized_text", "result"]],
   "min_nodes": 2,
   "required_effects": ["llm_inference"]
 }

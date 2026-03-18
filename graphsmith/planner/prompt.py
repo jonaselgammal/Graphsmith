@@ -28,6 +28,11 @@ Rules:
 - Only include inputs in "inputs" that the user would provide for this goal.
   Do NOT add optional skill inputs unless the goal explicitly requires them.
 - Every edge "from" address of the form "input.X" must have X declared in "inputs".
+- "outputs" should list ONLY the final deliverables requested by the goal.
+  Do NOT expose intermediate results unless the goal explicitly asks for them.
+- Name each output using the output port name of the skill that produces it
+  (e.g. if text.summarize.v1 outputs "summary", name the graph output "summary").
+  This ensures graph_outputs can map directly: {"summary": "summarize_node.summary"}.
 
 Use real names and types derived from the goal and available skills.
 Never output placeholder tokens or template variables.
@@ -54,21 +59,25 @@ optional<string>, optional<integer>
 }
 ```
 
-## Example 2: multi-skill chain
+## Example 2: multi-skill chain (only final output exposed)
+
+Goal: "Normalize text and then summarize it"
+Note: "normalized" is an intermediate result, NOT a final output.
+Only "summary" is the deliverable the user asked for.
 
 ```json
 {
   "inputs": [{"name": "text", "type": "string"}],
-  "outputs": [{"name": "keywords", "type": "string"}],
+  "outputs": [{"name": "summary", "type": "string"}],
   "nodes": [
     {"id": "normalize", "op": "skill.invoke", "config": {"skill_id": "text.normalize.v1", "version": "1.0.0"}},
-    {"id": "extract", "op": "skill.invoke", "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}}
+    {"id": "summarize", "op": "skill.invoke", "config": {"skill_id": "text.summarize.v1", "version": "1.0.0"}}
   ],
   "edges": [
     {"from": "input.text", "to": "normalize.text"},
-    {"from": "normalize.normalized", "to": "extract.text"}
+    {"from": "normalize.normalized", "to": "summarize.text"}
   ],
-  "graph_outputs": {"keywords": "extract.keywords"},
+  "graph_outputs": {"summary": "summarize.summary"},
   "effects": ["llm_inference"]
 }
 ```
