@@ -130,10 +130,10 @@ class TestDiagnosticsClassification:
 
 class TestInspectDiagnostics:
     def test_infer_from_content(self) -> None:
-        from scripts.inspect_diagnostics import _infer_failure_type
-        assert _infer_failure_type({"error": "429 rate limit"}) == "provider"
-        assert _infer_failure_type({"expected_in_shortlist": False}) == "retrieval"
-        assert _infer_failure_type({"expected_in_shortlist": True, "error": "wrong"}) == "planner"
+        from graphsmith.evaluation.diagnostics import infer_failure_type
+        assert infer_failure_type({"error": "429 rate limit"}) == "provider"
+        assert infer_failure_type({"expected_in_shortlist": False}) == "retrieval"
+        assert infer_failure_type({"expected_in_shortlist": True, "error": "wrong"}) == "planner"
 
 
 # ── scripts exist ────────────────────────────────────────────────────

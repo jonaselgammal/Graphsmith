@@ -79,13 +79,18 @@ def inspect(path: str) -> None:
 
 def _infer_failure_type(f: dict) -> str:
     """Infer failure type from content when the field is missing or empty."""
-    error = (f.get("error") or "").lower()
-    holes_text = " ".join(f.get("holes", [])).lower()
-    if any(s in error or s in holes_text for s in ["429", "rate limit", "provider error"]):
-        return "provider"
-    if f.get("expected_in_shortlist") is False:
-        return "retrieval"
-    return "planner"
+    try:
+        from graphsmith.evaluation.diagnostics import infer_failure_type
+        return infer_failure_type(f)
+    except ImportError:
+        # Fallback for running outside installed package
+        error = (f.get("error") or "").lower()
+        holes_text = " ".join(f.get("holes", [])).lower()
+        if any(s in error or s in holes_text for s in ["429", "rate limit", "provider error"]):
+            return "provider"
+        if f.get("expected_in_shortlist") is False:
+            return "retrieval"
+        return "planner"
 
 
 if __name__ == "__main__":

@@ -127,4 +127,4 @@ class TestPromptCompletenessGuidance:
     def test_example1_maps_all_outputs(self) -> None:
         """Example 1 must not have unmapped outputs."""
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
-        assert '"summary": "call.summary"' in ctx
+        assert '"keywords": "extract.keywords"' in ctx
