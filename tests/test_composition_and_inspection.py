@@ -31,7 +31,7 @@ PLANS_DIR = Path(__file__).resolve().parent.parent / "examples" / "plans"
 
 class TestPromptFormattingGuidance:
     def test_version_v4(self) -> None:
-        assert PROMPT_VERSION == "v4"
+        assert PROMPT_VERSION == "v5"
 
     def test_has_formatting_chain_example(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))

@@ -20,9 +20,9 @@ from graphsmith.validator import validate_skill_package
 
 
 class TestPromptOutputGuidance:
-    def test_prompt_teaches_final_outputs_only(self) -> None:
+    def test_prompt_teaches_output_intent(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
-        assert "final deliverables" in ctx.lower() or "ONLY the final" in ctx
+        assert "explicitly requests" in ctx.lower() or "user wants back" in ctx.lower()
 
     def test_prompt_teaches_output_naming(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))

@@ -7,7 +7,7 @@ from __future__ import annotations
 from graphsmith.constants import PRIMITIVE_OPS
 from graphsmith.planner.models import PlanRequest
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 _SYSTEM_MESSAGE = (
     "You are a Graphsmith graph planner. "
@@ -28,11 +28,13 @@ Rules:
 - Only include inputs in "inputs" that the user would provide for this goal.
   Do NOT add optional skill inputs unless the goal explicitly requires them.
 - Every edge "from" address of the form "input.X" must have X declared in "inputs".
-- "outputs" should list ONLY the final deliverables requested by the goal.
-  Do NOT expose intermediate results unless the goal explicitly asks for them.
+- "outputs" must include every result the goal explicitly requests.
+  If the goal says "normalize AND extract keywords", expose BOTH normalized and keywords.
+  If the goal says "normalize and THEN summarize", only summary is requested —
+  normalized is just a step toward it and should stay internal.
+  Key test: does the goal name this result as something the user wants back?
 - Name each output using the output port name of the skill that produces it
-  (e.g. if text.summarize.v1 outputs "summary", name the graph output "summary").
-  This ensures graph_outputs can map directly: {"summary": "summarize_node.summary"}.
+  (e.g. if text.normalize.v1 outputs "normalized", name the graph output "normalized").
 
 Use real names and types derived from the goal and available skills.
 Never output placeholder tokens or template variables.
@@ -59,11 +61,10 @@ optional<string>, optional<integer>
 }
 ```
 
-## Example 2: multi-skill chain (only final output exposed)
+## Example 2a: intermediate hidden — user wants only the final result
 
 Goal: "Normalize text and then summarize it"
-Note: "normalized" is an intermediate result, NOT a final output.
-Only "summary" is the deliverable the user asked for.
+The user wants the summary. Normalization is just a step — hide it.
 
 ```json
 {
@@ -78,6 +79,28 @@ Only "summary" is the deliverable the user asked for.
     {"from": "normalize.normalized", "to": "summarize.text"}
   ],
   "graph_outputs": {"summary": "summarize.summary"},
+  "effects": ["llm_inference"]
+}
+```
+
+## Example 2b: both results exposed — user asks for both
+
+Goal: "Normalize this text and extract keywords"
+The user wants BOTH the normalized text AND the keywords. Expose both.
+
+```json
+{
+  "inputs": [{"name": "text", "type": "string"}],
+  "outputs": [{"name": "normalized", "type": "string"}, {"name": "keywords", "type": "string"}],
+  "nodes": [
+    {"id": "normalize", "op": "skill.invoke", "config": {"skill_id": "text.normalize.v1", "version": "1.0.0"}},
+    {"id": "extract", "op": "skill.invoke", "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}}
+  ],
+  "edges": [
+    {"from": "input.text", "to": "normalize.text"},
+    {"from": "normalize.normalized", "to": "extract.text"}
+  ],
+  "graph_outputs": {"normalized": "normalize.normalized", "keywords": "extract.keywords"},
   "effects": ["llm_inference"]
 }
 ```
