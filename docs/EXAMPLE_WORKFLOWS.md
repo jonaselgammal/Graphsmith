@@ -125,7 +125,7 @@ graphsmith promote-candidates --trace-root "$TRACES"
 
 ## Workflow 6: Real LLM planning
 
-Requires an API key. See [provider architecture](SPRINT_08A_PROVIDER_ARCHITECTURE.md).
+Requires an API key. Set `GRAPHSMITH_ANTHROPIC_API_KEY` or `GRAPHSMITH_OPENAI_API_KEY`.
 
 ```bash
 export GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
