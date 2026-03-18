@@ -17,7 +17,7 @@ from graphsmith.validator import validate_skill_package
 
 class TestPromptParaphraseGuidance:
     def test_version_v6(self) -> None:
-        assert PROMPT_VERSION == "v6"
+        assert PROMPT_VERSION == "v7"
 
     def test_has_paraphrase_rule(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))

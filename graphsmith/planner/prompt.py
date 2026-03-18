@@ -7,7 +7,7 @@ from __future__ import annotations
 from graphsmith.constants import PRIMITIVE_OPS
 from graphsmith.planner.models import PlanRequest
 
-PROMPT_VERSION = "v6"
+PROMPT_VERSION = "v7"
 
 _SYSTEM_MESSAGE = (
     "You are a Graphsmith graph planner. "
@@ -42,6 +42,10 @@ Rules:
   each action names a deliverable the user wants back.
 - Name each output using the output port name of the skill that produces it
   (e.g. if text.normalize.v1 outputs "normalized", name the graph output "normalized").
+- CONSTANTS vs INPUTS: if the goal mentions a fixed string (e.g. "add a header
+  saying Results", "format as a bullet list"), that fixed text is a CONSTANT.
+  Embed it in a template.render node's config.template — NOT as a graph-level input.
+  Only values the user provides at runtime belong in "inputs".
 
 Use real names and types derived from the goal and available skills.
 Never output placeholder tokens or template variables.
@@ -156,6 +160,28 @@ The final output uses the formatting skill's port name.
     {"from": "extract.keywords", "to": "format.lines"}
   ],
   "graph_outputs": {"joined": "format.joined"},
+  "effects": ["llm_inference"]
+}
+```
+
+## Example 3b: formatting with a constant header (no extra input)
+
+Goal: "Extract keywords and add a header saying Results"
+"Results" is a constant — embed it in config.template, not as a graph input.
+
+```json
+{
+  "inputs": [{"name": "text", "type": "string"}],
+  "outputs": [{"name": "formatted", "type": "string"}],
+  "nodes": [
+    {"id": "extract", "op": "skill.invoke", "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}},
+    {"id": "format", "op": "template.render", "config": {"template": "Results:\n{{text}}"}}
+  ],
+  "edges": [
+    {"from": "input.text", "to": "extract.text"},
+    {"from": "extract.keywords", "to": "format.text"}
+  ],
+  "graph_outputs": {"formatted": "format.rendered"},
   "effects": ["llm_inference"]
 }
 ```

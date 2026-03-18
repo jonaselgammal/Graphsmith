@@ -17,7 +17,7 @@ from graphsmith.validator import validate_skill_package
 
 class TestPromptOutputIntent:
     def test_version_v5(self) -> None:
-        assert PROMPT_VERSION == "v6"
+        assert PROMPT_VERSION == "v7"
 
     def test_teaches_and_vs_then(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))

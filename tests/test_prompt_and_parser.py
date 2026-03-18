@@ -25,7 +25,7 @@ class TestPromptContent:
         assert f"[graphsmith-planner-prompt {PROMPT_VERSION}]" in ctx
 
     def test_version_is_v4(self) -> None:
-        assert PROMPT_VERSION == "v6"
+        assert PROMPT_VERSION == "v7"
 
     def test_contains_json_schema_keys(self) -> None:
         ctx = build_planning_context(self._request())
