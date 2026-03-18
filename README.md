@@ -9,7 +9,8 @@ graph skills over a deterministic runtime — instead of relying only on
 ad hoc code generation or flat tool calls.
 
 No public servers. No API keys required for core functionality.
-Everything runs locally.
+Everything runs locally. On the current benchmark and holdout task family,
+the real Anthropic planner reaches **100% structural pass rate** (24/24 goals).
 
 ## Core concepts
 
@@ -180,10 +181,10 @@ graphsmith run examples/skills/text.summarize.v1 \
   --input '{"text":"Cats sleep a lot","max_sentences":2}' --mock-llm
 ```
 
-## Visual plan inspector
+## Visual plan inspector (local, read-only)
 
 ```bash
-# Launch the local inspector UI
+# Launch the local inspector UI in your browser
 graphsmith ui
 
 # Or inspect a plan from the command line
@@ -191,9 +192,10 @@ graphsmith show-plan examples/plans/normalize_extract_keywords.json
 graphsmith render-plan examples/plans/normalize_extract_keywords.json --format mermaid
 ```
 
-The inspector opens in your browser. Drag a saved plan JSON onto the page
-to see its graph: nodes, edges, inputs, outputs. Click nodes for details.
-Export to Mermaid for docs. No network access — everything runs locally.
+The inspector is a local-only, read-only tool for examining saved plans.
+Drag a plan JSON onto the page to see its graph: nodes, edges, inputs, outputs.
+Click nodes for details. Export to Mermaid for docs.
+No network access, no hosted backend — it is not a full visual editor or web UI.
 
 ## LLM providers
 
@@ -250,25 +252,42 @@ See [example workflows](docs/EXAMPLE_WORKFLOWS.md) for end-to-end usage.
 | `promote-candidates` | Find repeated patterns |
 | `show-plan <path>` | Show plan details (text) |
 | `render-plan <path>` | Render plan as Mermaid |
-| `ui` | Launch visual plan inspector |
+| `ui` | Launch local plan inspector |
 | `eval-planner` | Evaluate planner quality |
+
+## Measured planner quality
+
+Graphsmith includes a planner evaluation harness with two goal sets:
+
+| Set | Goals | Latest Anthropic result |
+|-----|-------|------------------------|
+| Benchmark v1 | 9 | 9/9 = 100% |
+| Holdout | 15 | 15/15 = 100% |
+
+```bash
+graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
+  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+```
+
+See [evaluation/README.md](evaluation/README.md) for benchmark strategy and goal format.
 
 ## Current limitations
 
 Graphsmith is a working prototype, not a production system.
 
-**Planning quality is still evolving.** The mock planner naively picks
-the first candidate skill. Real LLM planning (via `--backend llm`) produces
-multi-skill graphs but output quality depends on the model and may require
-prompt iteration. Plans can be saved and inspected with `--save-on-failure`.
+**Planning works well on the current task family.** Real LLM planning
+(via `--backend llm`) produces valid multi-skill graphs for single-skill,
+two-skill, and three-skill compositions across paraphrased goal wordings.
+Planning quality on broader or more ambiguous task families has not been
+measured yet. Plans can be saved and inspected with `--save-on-failure`.
 
 **Runtime and validation are stable.** The deterministic executor, value
 binding semantics, topological sort, and validation checks are well-tested
-(430+ tests) and behave predictably.
+(530+ tests) and behave predictably.
 
 **Not yet implemented:**
 - Public skill registry (everything is local)
-- Web UI
+- Hosted web UI or visual editor (only a local read-only inspector exists)
 - Semantic search (embeddings)
 - Distributed execution
 - Autonomous skill promotion (candidates are advisory only)
@@ -299,7 +318,7 @@ graphsmith/         Python package
   planner/          LLM planner + prompt builder + output parser
   traces/           Trace persistence + promotion mining
   cli/              Typer CLI
-tests/              pytest test suite (430+ tests)
+tests/              pytest test suite (530+ tests)
 examples/skills/    Example skill packages
 docs/               Architecture and design docs
 ```
@@ -319,6 +338,7 @@ GRAPHSMITH_ANTHROPIC_API_KEY=sk-... pytest tests/test_live_providers.py -v
 - [Why Graphsmith](docs/WHY_GRAPHSMITH.md) — motivation and research direction
 - [Architecture diagram](docs/ARCHITECTURE_DIAGRAM.md)
 - [Example workflows](docs/EXAMPLE_WORKFLOWS.md)
+- [Evaluation benchmark](evaluation/README.md) — planner quality measurement
 - [Binding semantics](docs/BINDING_SEMANTICS.md)
 - [Registry semantics](docs/REGISTRY_SEMANTICS.md)
 - [Planner semantics](docs/PLANNER_SEMANTICS.md)
