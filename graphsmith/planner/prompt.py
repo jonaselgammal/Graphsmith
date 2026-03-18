@@ -61,23 +61,19 @@ string, integer, number, boolean, bytes, object,
 array<string>, array<integer>, array<object>,
 optional<string>, optional<integer>
 
-## Example 1: single-skill plan — output uses skill port name, not goal wording
-
-Goal: "Find the key topics in this text"
-The skill text.extract_keywords.v1 has output_ports: [keywords].
-The output MUST be named "keywords" — NOT "topics" (the goal's word).
+## Example 1: single-skill plan
 
 ```json
 {
   "inputs": [{"name": "text", "type": "string"}],
-  "outputs": [{"name": "keywords", "type": "string"}],
+  "outputs": [{"name": "summary", "type": "string"}],
   "nodes": [
-    {"id": "extract", "op": "skill.invoke", "config": {"skill_id": "text.extract_keywords.v1", "version": "1.0.0"}}
+    {"id": "call", "op": "skill.invoke", "config": {"skill_id": "text.summarize.v1", "version": "1.0.0"}}
   ],
   "edges": [
-    {"from": "input.text", "to": "extract.text"}
+    {"from": "input.text", "to": "call.text"}
   ],
-  "graph_outputs": {"keywords": "extract.keywords"},
+  "graph_outputs": {"summary": "call.summary"},
   "effects": ["llm_inference"]
 }
 ```
