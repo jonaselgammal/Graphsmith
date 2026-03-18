@@ -24,18 +24,29 @@ _SYNONYMS: dict[str, list[str]] = {
     "find": ["extract"],
     "condense": ["summarize", "summary"],
     "brief": ["summarize", "summary"],
+    "summary": ["summarize", "summarization"],
+    "summarize": ["summary", "summarization"],
+    "write": ["summarize", "generate"],
     "capitalize": ["title", "case"],
     "count": ["word", "count"],
     "many": ["count", "word"],
+    "words": ["word", "count"],
     "parse": ["json", "extract"],
     "header": ["prefix", "format"],
     "bullet": ["join", "format", "list"],
     "list": ["join", "format"],
     "sentiment": ["sentiment", "classify"],
     "feeling": ["sentiment", "classify"],
+    "analyze": ["classify", "sentiment", "analysis"],
+    "short": ["summarize", "summary"],
 }
 
-RETRIEVAL_MODES = ("ranked", "broad", "ranked_broad")
+# Common suffixes stripped during stem matching
+_SUFFIX_PATTERNS = re.compile(
+    r"(ization|isation|ments?|ness|tion|sion|ize|ise|ing|ous|ful|ble|ity|ed|er|ly|es|al|s)$"
+)
+
+RETRIEVAL_MODES = ("ranked", "ranked_recall", "broad", "ranked_broad")
 
 
 class RetrievalDiagnostics(BaseModel):
@@ -75,9 +86,11 @@ def retrieve_candidates_with_diagnostics(
     if mode == "broad":
         return _retrieve_broad(goal, registry, max_candidates=max(max_candidates, 15))
     elif mode == "ranked_broad":
-        return _retrieve_ranked(goal, registry, max_candidates=12)
+        return _retrieve_ranked(goal, registry, max_candidates=12, use_stems=False, mode_name="ranked_broad")
+    elif mode == "ranked_recall":
+        return _retrieve_ranked(goal, registry, max_candidates=10, use_stems=True, mode_name="ranked_recall")
     else:
-        return _retrieve_ranked(goal, registry, max_candidates=max_candidates)
+        return _retrieve_ranked(goal, registry, max_candidates=max_candidates, use_stems=False, mode_name="ranked")
 
 
 def _retrieve_ranked(
@@ -85,14 +98,16 @@ def _retrieve_ranked(
     registry: LocalRegistry,
     *,
     max_candidates: int = _DEFAULT_MAX,
+    use_stems: bool = False,
+    mode_name: str = "ranked",
 ) -> tuple[RetrievalDiagnostics, list[IndexEntry]]:
-    """Ranked retrieval: stop words + synonyms + word-boundary scoring."""
+    """Ranked retrieval with optional stem matching."""
     raw_tokens = _tokenise_raw(goal)
     tokens = _expand_synonyms(raw_tokens)
     all_entries = registry.list_all()
 
     diag = RetrievalDiagnostics(
-        goal=goal, mode="ranked",
+        goal=goal, mode=mode_name,
         raw_tokens=raw_tokens, expanded_tokens=tokens,
     )
 
@@ -103,7 +118,7 @@ def _retrieve_ranked(
 
     scored: list[tuple[int, IndexEntry]] = []
     for entry in all_entries:
-        score = _relevance_score(entry, tokens)
+        score = _relevance_score(entry, tokens, use_stems=use_stems)
         scored.append((score, entry))
         diag.scores[entry.id] = score
 
@@ -152,10 +167,20 @@ def _retrieve_broad(
     return diag, results
 
 
-# ── scoring helpers ──────────────────────────────────────────────────
+# ── scoring ──────────────────────────────────────────────────────────
 
 
-def _relevance_score(entry: IndexEntry, tokens: list[str]) -> int:
+def _stem(word: str) -> str:
+    """Lightweight suffix stripping for matching word forms."""
+    if len(word) <= 4:
+        return word
+    return _SUFFIX_PATTERNS.sub("", word) or word
+
+
+def _relevance_score(
+    entry: IndexEntry, tokens: list[str], *, use_stems: bool = False,
+) -> int:
+    """Score by token-to-metadata word overlap. Optionally stem-aware."""
     id_words = set(re.findall(r"[a-z0-9]+", entry.id.lower()))
     name_words = set(re.findall(r"[a-z0-9]+", entry.name.lower()))
     desc_words = set(re.findall(r"[a-z0-9]+", entry.description.lower()))
@@ -164,17 +189,27 @@ def _relevance_score(entry: IndexEntry, tokens: list[str]) -> int:
         tag_words.update(re.findall(r"[a-z0-9]+", t.lower()))
     all_words = id_words | name_words | desc_words | tag_words
 
+    if use_stems:
+        tag_stems = {_stem(w) for w in tag_words}
+        all_stems = {_stem(w) for w in all_words}
+    else:
+        tag_stems = tag_words
+        all_stems = all_words
+
     score = 0
     for token in tokens:
-        if token in tag_words:
+        t = _stem(token) if use_stems else token
+        if t in tag_stems:
             score += 2
-        elif token in all_words:
+        elif t in all_stems:
             score += 1
     return score
 
 
+# ── tokenisation ─────────────────────────────────────────────────────
+
+
 def _tokenise_raw(text: str) -> list[str]:
-    """Tokenise with stop words filtered, no synonym expansion."""
     words = re.findall(r"[a-zA-Z0-9]+", text.lower())
     seen: set[str] = set()
     out: list[str] = []
@@ -186,7 +221,6 @@ def _tokenise_raw(text: str) -> list[str]:
 
 
 def _expand_synonyms(tokens: list[str]) -> list[str]:
-    """Expand tokens with synonym mappings."""
     seen = set(tokens)
     out = list(tokens)
     for t in list(tokens):
@@ -198,7 +232,6 @@ def _expand_synonyms(tokens: list[str]) -> list[str]:
 
 
 def _tokenise_no_filter(text: str) -> list[str]:
-    """Tokenise without stop words or synonyms (broad mode)."""
     words = re.findall(r"[a-zA-Z0-9]+", text.lower())
     seen: set[str] = set()
     out: list[str] = []
@@ -209,6 +242,5 @@ def _tokenise_no_filter(text: str) -> list[str]:
     return out
 
 
-# Backward compat alias
 def _tokenise(text: str) -> list[str]:
     return _expand_synonyms(_tokenise_raw(text))
