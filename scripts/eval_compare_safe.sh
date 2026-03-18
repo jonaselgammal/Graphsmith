@@ -4,7 +4,7 @@ set -euo pipefail
 # Rate-limit-safe retrieval mode comparison across all eval sets
 # Usage: scripts/eval_compare_safe.sh --backend llm --provider anthropic --model claude-haiku-4-5-20251001
 
-DELAY="${GS_EVAL_DELAY:-2}"  # seconds between goals (configurable via env)
+DELAY="${GS_EVAL_DELAY:-3}"  # seconds between goals (configurable via env)
 
 REG=$(mktemp -d)
 trap "rm -rf $REG" EXIT
@@ -21,8 +21,8 @@ for SET in goals holdout_goals challenge_goals; do
     --compare-retrieval --delay "$DELAY" \
     --save-results "/tmp/gs_compare_${SET}.json" "${@}"
   echo ""
-  echo "  (waiting 10s between sets...)"
-  sleep 10
+  echo "  (waiting 15s between sets...)"
+  sleep 15
 done
 
 echo "Results saved to /tmp/gs_compare_*.json"

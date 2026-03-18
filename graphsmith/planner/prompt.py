@@ -100,8 +100,11 @@ The user wants the summary. Normalization is just a step — hide it.
 
 ## Example 2b: both results exposed — user asks for both
 
-Goal: "Normalize this text and extract keywords"
-The user wants BOTH the normalized text AND the keywords. Expose both.
+Goal: "Tidy up this text and find the key topics"
+"Tidy up" = normalize, "find topics" = extract keywords.
+The user wants BOTH. Output names use SKILL PORT NAMES: "normalized" and "keywords".
+Even though the goal says "topics", the output is named "keywords" because that is
+text.extract_keywords.v1's actual output port.
 
 ```json
 {
