@@ -35,7 +35,7 @@ class TestPromptTopicsExample:
 
     def test_prompt_says_never_use_goal_phrasing(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
-        assert "NEVER use the goal" in ctx
+        assert "NEVER invent" in ctx or "NEVER split" in ctx
 
 
 # ── correct topics plan ──────────────────────────────────────────────

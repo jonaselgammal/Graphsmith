@@ -41,11 +41,13 @@ Rules:
 - When the goal lists multiple actions with "and" or commas ("X, Y, and Z"),
   each action names a deliverable the user wants back.
 - ALWAYS name each output using the skill's actual output port name, even if the
-  goal uses different words. Examples:
-  Goal says "topics" → skill text.extract_keywords.v1 outputs "keywords" → name it "keywords"
-  Goal says "summary" → skill text.summarize.v1 outputs "summary" → name it "summary"
-  Goal says "clean text" → skill text.normalize.v1 outputs "normalized" → name it "normalized"
-  NEVER use the goal's phrasing as the output name. Use the skill's port name.
+  goal uses different words. Check the skill's "outputs" list in the candidate info
+  and use EXACTLY those names. Examples:
+  Goal says "topics" → skill outputs ["keywords"] → name it "keywords"
+  Goal says "name and value" → skill outputs ["selected"] → name it "selected" (one object)
+  Goal says "clean text" → skill outputs ["normalized"] → name it "normalized"
+  NEVER invent output names from the goal. NEVER split a single skill output into
+  multiple graph outputs. Use the skill's exact port names.
 - CONSTANTS vs INPUTS: if the goal mentions a fixed string (e.g. "add a header
   saying Results", "format as a bullet list"), that fixed text is a CONSTANT.
   Embed it in a template.render node's config.template — NOT as a graph-level input.
@@ -193,6 +195,26 @@ Goal: "Extract keywords and add a header saying Results"
 }
 ```
 
+## Example 3c: JSON skill — use the skill's exact output port name
+
+Goal: "Extract the name and value from this JSON"
+json.reshape.v1 outputs ["selected"] (a single object containing the fields).
+Do NOT split into separate "name" and "value" outputs. Use "selected".
+
+```json
+{
+  "inputs": [{"name": "raw_json", "type": "string"}],
+  "outputs": [{"name": "selected", "type": "object"}],
+  "nodes": [
+    {"id": "reshape", "op": "skill.invoke", "config": {"skill_id": "json.reshape.v1", "version": "1.0.0"}}
+  ],
+  "edges": [
+    {"from": "input.raw_json", "to": "reshape.raw_json"}
+  ],
+  "graph_outputs": {"selected": "reshape.selected"}
+}
+```
+
 ## Example 4: partial plan with holes
 
 ```json
@@ -258,7 +280,7 @@ def build_planning_context(request: PlanRequest) -> str:
             tag_line = f"  tags: [{tags}]" if tags else ""
             lines.append(
                 f"- {entry.id}@{entry.version}: {entry.description}\n"
-                f"  inputs: [{ins}]  outputs: [{outs}]  effects: [{effs}]"
+                f"  inputs: [{ins}]  output_ports: [{outs}]  effects: [{effs}]"
                 + (f"\n{tag_line}" if tag_line else "")
             )
         lines.append("")
