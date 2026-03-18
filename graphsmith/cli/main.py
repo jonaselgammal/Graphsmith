@@ -822,6 +822,7 @@ def eval_planner(
     retrieval_mode: str = typer.Option("ranked", "--retrieval-mode", help="Retrieval mode: ranked, broad, ranked_broad."),
     save_diagnostics: Optional[str] = typer.Option(None, "--save-diagnostics", help="Save per-goal diagnostics JSON."),
     compare_retrieval: bool = typer.Option(False, "--compare-retrieval", help="Compare all retrieval modes."),
+    delay: float = typer.Option(0.0, "--delay", help="Seconds to wait between goals (rate-limit protection)."),
 ) -> None:
     """Evaluate planner quality against a set of known goals."""
     from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
@@ -844,6 +845,7 @@ def eval_planner(
         reports = compare_retrieval_modes(
             goals, reg, planner_backend,
             provider_name=prov_name, model_name=mod_name,
+            delay_seconds=delay,
         )
         if save_results:
             Path(save_results).write_text(
@@ -862,6 +864,7 @@ def eval_planner(
         goals, reg, planner_backend,
         provider_name=prov_name, model_name=mod_name,
         retrieval_mode=retrieval_mode,
+        delay_seconds=delay,
     )
 
     if save_results:
@@ -875,6 +878,7 @@ def eval_planner(
         for r in report.results:
             d: dict[str, Any] = {
                 "goal": r.goal, "status": r.status,
+                "failure_type": r.failure_type,
                 "expected_in_shortlist": r.expected_skills_in_shortlist,
             }
             if r.retrieval:

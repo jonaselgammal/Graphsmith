@@ -37,7 +37,8 @@ def inspect(path: str) -> None:
         error = f.get("error", "")
         holes = f.get("holes", [])
 
-        print(f"\n  [{status.upper()}] {goal}")
+        ftype = f.get("failure_type", "?")
+        print(f"\n  [{status.upper()}] {goal}  (failure_type: {ftype})")
         print(f"    expected_in_shortlist: {in_list}")
         print(f"    candidates ({cand_count}): {shortlist}")
         print(f"    tokens: {tokens}")

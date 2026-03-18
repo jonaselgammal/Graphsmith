@@ -40,8 +40,12 @@ Rules:
   If the goal mentions an action by ANY name, the result is a requested deliverable.
 - When the goal lists multiple actions with "and" or commas ("X, Y, and Z"),
   each action names a deliverable the user wants back.
-- Name each output using the output port name of the skill that produces it
-  (e.g. if text.normalize.v1 outputs "normalized", name the graph output "normalized").
+- ALWAYS name each output using the skill's actual output port name, even if the
+  goal uses different words. Examples:
+  Goal says "topics" → skill text.extract_keywords.v1 outputs "keywords" → name it "keywords"
+  Goal says "summary" → skill text.summarize.v1 outputs "summary" → name it "summary"
+  Goal says "clean text" → skill text.normalize.v1 outputs "normalized" → name it "normalized"
+  NEVER use the goal's phrasing as the output name. Use the skill's port name.
 - CONSTANTS vs INPUTS: if the goal mentions a fixed string (e.g. "add a header
   saying Results", "format as a bullet list"), that fixed text is a CONSTANT.
   Embed it in a template.render node's config.template — NOT as a graph-level input.

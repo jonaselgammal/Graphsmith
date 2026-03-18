@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ class EvalResult(BaseModel):
 
     goal: str
     status: str = "fail"
+    failure_type: str = ""  # "planner", "retrieval", "provider", or "" if pass
     checks: EvalChecks = Field(default_factory=EvalChecks)
     score: float = 0.0
     plan_status: str = ""
@@ -124,6 +126,19 @@ def evaluate_goal(
     except Exception as exc:
         result_obj.error = str(exc)
         result_obj.status = "fail"
+        result_obj.failure_type = "provider"
+        return result_obj
+
+    # Check if plan_result itself reports a provider error
+    if plan_result.status == "failure" and any(
+        "provider" in h.lower() or "rate limit" in h.lower() or "429" in h
+        for h in [h_obj.description for h_obj in plan_result.holes]
+    ):
+        result_obj.plan_status = plan_result.status
+        result_obj.holes = [h.description for h in plan_result.holes]
+        result_obj.error = plan_result.reasoning
+        result_obj.status = "fail"
+        result_obj.failure_type = "provider"
         return result_obj
 
     result_obj.plan_status = plan_result.status
@@ -183,6 +198,11 @@ def evaluate_goal(
         else "partial" if result_obj.score > 0
         else "fail"
     )
+
+    # Classify failure type
+    if result_obj.status != "pass":
+        result_obj.failure_type = _classify_failure(result_obj)
+
     return result_obj
 
 
@@ -194,10 +214,13 @@ def run_evaluation(
     provider_name: str = "",
     model_name: str = "",
     retrieval_mode: str = "ranked",
+    delay_seconds: float = 0.0,
 ) -> EvalReport:
     """Run evaluation across all goals and produce a report."""
     results: list[EvalResult] = []
-    for g in goals:
+    for i, g in enumerate(goals):
+        if delay_seconds > 0 and i > 0:
+            time.sleep(delay_seconds)
         r = evaluate_goal(g, registry, backend, retrieval_mode=retrieval_mode)
         results.append(r)
 
@@ -229,18 +252,45 @@ def compare_retrieval_modes(
     provider_name: str = "",
     model_name: str = "",
     modes: list[str] | None = None,
+    delay_seconds: float = 0.0,
+    mode_delay_seconds: float = 5.0,
 ) -> dict[str, EvalReport]:
-    """Run evaluation across multiple retrieval modes for comparison."""
+    """Run evaluation across multiple retrieval modes for comparison.
+
+    mode_delay_seconds: pause between modes to avoid rate limits.
+    delay_seconds: pause between individual goals.
+    """
     modes = modes or list(RETRIEVAL_MODES)
     reports: dict[str, EvalReport] = {}
-    for mode in modes:
+    for i, mode in enumerate(modes):
+        if i > 0 and mode_delay_seconds > 0:
+            time.sleep(mode_delay_seconds)
         reports[mode] = run_evaluation(
             goals, registry, backend,
             provider_name=provider_name,
             model_name=model_name,
             retrieval_mode=mode,
+            delay_seconds=delay_seconds,
         )
     return reports
+
+
+def _classify_failure(result: EvalResult) -> str:
+    """Classify a non-pass result as provider, retrieval, or planner failure."""
+    # Provider errors
+    error_lower = result.error.lower()
+    if any(s in error_lower for s in ["429", "rate limit", "provider error", "api error"]):
+        return "provider"
+    for hole in result.holes:
+        if any(s in hole.lower() for s in ["429", "rate limit", "provider"]):
+            return "provider"
+
+    # Retrieval failures
+    if not result.expected_skills_in_shortlist:
+        return "retrieval"
+
+    # Everything else is a planner failure
+    return "planner"
 
 
 def _score(checks: EvalChecks) -> float:
