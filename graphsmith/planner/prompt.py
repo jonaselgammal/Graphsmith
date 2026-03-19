@@ -54,6 +54,19 @@ Rules:
   Only values the user provides at runtime belong in "inputs".
   NEVER use "config.X" as an edge source address. "config" is not a graph scope.
   Edge sources must be "input.X" or "node_id.port".
+- ADDRESS SYNTAX: every edge address must be "scope.port" with a dot separator.
+  Valid scopes: "input" or an actual node ID from the nodes list.
+  INVALID: bare words like "text", "summary", "graph_outputs".
+  INVALID: "output.X" — "output" is NOT a valid scope. Graph outputs go in
+  "graph_outputs", not as edge destinations.
+- GRAPH OUTPUTS: each value in "graph_outputs" must reference an actual node ID
+  from the nodes list. If a node is named "count_text", write "count_text.count"
+  not "count.count".
+- EFFECTS: use ONLY from this list: pure, llm_inference, network_read, network_write,
+  filesystem_read, filesystem_write, memory_read, memory_write.
+  If unsure, use "pure" for non-LLM skills. Do NOT invent effects.
+- EDGE CONFLICTS: each destination port can only receive from ONE source edge.
+  Do NOT wire two different edges to the same "node.port".
 
 Use real names and types derived from the goal and available skills.
 Never output placeholder tokens or template variables.
