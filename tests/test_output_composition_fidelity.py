@@ -13,10 +13,10 @@ from graphsmith.validator import validate_skill_package
 from graphsmith.exceptions import ValidationError
 
 
-class TestPromptMinimalComposition:
-    def test_has_minimal_composition_rule(self) -> None:
+class TestPromptCompositionPolicy:
+    def test_has_composition_policy(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
-        assert "MINIMAL COMPOSITION" in ctx
+        assert "COMPOSITION POLICY" in ctx
 
     def test_says_no_formatting_unless_asked(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
@@ -24,7 +24,7 @@ class TestPromptMinimalComposition:
 
     def test_shows_keywords_only_example(self) -> None:
         ctx = build_planning_context(PlanRequest(goal="test", candidates=[]))
-        assert "extract_keywords.v1 ONLY" in ctx
+        assert "1 node (extract only)" in ctx
 
 
 class TestSingleSkillKeywordExtraction:

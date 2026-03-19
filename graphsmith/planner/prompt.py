@@ -51,16 +51,20 @@ Rules:
   Goal says "clean text" → skill outputs ["normalized"] → name it "normalized"
   NEVER invent output names from the goal. NEVER split a single skill output into
   multiple graph outputs. Use the skill's exact port names.
-- MINIMAL COMPOSITION: do NOT add formatting, joining, or rendering nodes unless
-  the goal explicitly asks for formatting, a list, a header, or presentation.
-  "Extract keywords" → use text.extract_keywords.v1 ONLY, output "keywords" directly.
-  "Extract keywords and format as a list" → THEN add a formatting node.
-- CONSTANTS vs INPUTS: if the goal mentions a fixed string (e.g. "add a header
-  saying Results", "format as a bullet list"), that fixed text is a CONSTANT.
-  Embed it in a template.render node's config.template — NOT as a graph-level input.
-  Only values the user provides at runtime belong in "inputs".
-  NEVER use "config.X" as an edge source address. "config" is not a graph scope.
-  Edge sources must be "input.X" or "node_id.port".
+- COMPOSITION POLICY:
+  IF the goal says "format", "list", "header", "present", or "bullet" → you MUST
+  add the appropriate formatting/joining/rendering node(s). Do not skip them.
+  IF the goal does NOT mention formatting → do NOT add formatting nodes.
+  Examples:
+    "Extract keywords" → 1 node (extract only), output "keywords"
+    "Extract keywords and format as a list" → 2 nodes (extract + join_lines)
+    "Extract keywords and add a header saying Results" → 2 nodes (extract + template.render)
+- CONSTANTS: fixed strings from the goal (e.g. "Results", "Summary:") are constants.
+  Embed them in a template.render node's config.template field.
+  VALID: {"op": "template.render", "config": {"template": "Results:\n{{text}}"}}
+  INVALID: creating input.prefix_const, input.header, input.prefix_value, or any
+  graph-level input for a fixed string. These are NOT runtime inputs.
+  NEVER use "config.X" as an edge source. Edge sources: "input.X" or "node_id.port".
 - ADDRESS SYNTAX: every edge address must be "scope.port" with a dot separator.
   Valid scopes: "input" or an actual node ID from the nodes list.
   INVALID: bare words like "text", "summary", "graph_outputs".
