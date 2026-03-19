@@ -131,8 +131,10 @@ def evaluate_goal(
         return result_obj
 
     # Check if plan_result itself reports a provider error
+    _provider_signals = ["provider", "rate limit", "429", "credit balance",
+                         "api key", "authentication", "unauthorized", "api error"]
     if plan_result.status == "failure" and any(
-        "provider" in h.lower() or "rate limit" in h.lower() or "429" in h
+        any(sig in h.lower() for sig in _provider_signals)
         for h in [h_obj.description for h_obj in plan_result.holes]
     ):
         result_obj.plan_status = plan_result.status
@@ -283,11 +285,14 @@ def compare_retrieval_modes(
 def _classify_failure(result: EvalResult) -> str:
     """Classify a non-pass result as provider, retrieval, or planner failure."""
     # Provider errors
+    _sigs = ["429", "rate limit", "provider error", "api error",
+             "credit balance", "api key", "authentication",
+             "unauthorized", "forbidden", "connect", "timeout"]
     error_lower = result.error.lower()
-    if any(s in error_lower for s in ["429", "rate limit", "provider error", "api error"]):
+    if any(s in error_lower for s in _sigs):
         return "provider"
     for hole in result.holes:
-        if any(s in hole.lower() for s in ["429", "rate limit", "provider"]):
+        if any(s in hole.lower() for s in _sigs):
             return "provider"
 
     # Retrieval failures

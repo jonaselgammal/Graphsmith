@@ -86,7 +86,10 @@ def _infer_failure_type(f: dict) -> str:
         # Fallback for running outside installed package
         error = (f.get("error") or "").lower()
         holes_text = " ".join(f.get("holes", [])).lower()
-        if any(s in error or s in holes_text for s in ["429", "rate limit", "provider error"]):
+        _sigs = ["429", "rate limit", "provider error", "credit balance",
+                 "api key", "authentication", "unauthorized", "api error",
+                 "connect", "timeout"]
+        if any(s in error or s in holes_text for s in _sigs):
             return "provider"
         if f.get("expected_in_shortlist") is False:
             return "retrieval"
