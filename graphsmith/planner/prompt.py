@@ -48,6 +48,10 @@ Rules:
   Goal says "clean text" → skill outputs ["normalized"] → name it "normalized"
   NEVER invent output names from the goal. NEVER split a single skill output into
   multiple graph outputs. Use the skill's exact port names.
+- MINIMAL COMPOSITION: do NOT add formatting, joining, or rendering nodes unless
+  the goal explicitly asks for formatting, a list, a header, or presentation.
+  "Extract keywords" → use text.extract_keywords.v1 ONLY, output "keywords" directly.
+  "Extract keywords and format as a list" → THEN add a formatting node.
 - CONSTANTS vs INPUTS: if the goal mentions a fixed string (e.g. "add a header
   saying Results", "format as a bullet list"), that fixed text is a CONSTANT.
   Embed it in a template.render node's config.template — NOT as a graph-level input.
