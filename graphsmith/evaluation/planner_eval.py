@@ -58,6 +58,7 @@ class EvalResult(BaseModel):
     error: str = ""
     retrieval: RetrievalDiagnostics | None = None
     expected_skills_in_shortlist: bool = False
+    plan_json: dict[str, Any] | None = None
 
 
 class EvalReport(BaseModel):
@@ -143,6 +144,10 @@ def evaluate_goal(
 
     result_obj.plan_status = plan_result.status
     result_obj.holes = [h.description for h in plan_result.holes]
+
+    # Capture the raw plan for artifact saving
+    if plan_result.graph is not None:
+        result_obj.plan_json = plan_result.graph.model_dump()
 
     # 3. Checks
     checks.parsed = plan_result.status != "failure"

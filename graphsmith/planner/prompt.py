@@ -52,6 +52,8 @@ Rules:
   saying Results", "format as a bullet list"), that fixed text is a CONSTANT.
   Embed it in a template.render node's config.template — NOT as a graph-level input.
   Only values the user provides at runtime belong in "inputs".
+  NEVER use "config.X" as an edge source address. "config" is not a graph scope.
+  Edge sources must be "input.X" or "node_id.port".
 
 Use real names and types derived from the goal and available skills.
 Never output placeholder tokens or template variables.

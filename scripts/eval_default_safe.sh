@@ -20,7 +20,8 @@ for SET in goals holdout_goals challenge_goals; do
   echo "=== $LABEL ==="
   graphsmith eval-planner --goals "evaluation/$SET" --registry "$REG" \
     --delay "$DELAY" \
-    --save-diagnostics "/tmp/gs_diag_${SET}.json" "${@}"
+    --save-diagnostics "/tmp/gs_diag_${SET}.json" \
+    --save-failed-plans "/tmp/gs_failed_plans_${SET}" "${@}"
   echo ""
 done
 
@@ -29,4 +30,11 @@ echo "  /tmp/gs_diag_goals.json"
 echo "  /tmp/gs_diag_holdout_goals.json"
 echo "  /tmp/gs_diag_challenge_goals.json"
 echo ""
-echo "Inspect with: python scripts/inspect_diagnostics.py /tmp/gs_diag_*.json"
+echo "Failed plans saved to /tmp/gs_failed_plans_*/"
+echo ""
+echo "Inspect diagnostics:"
+echo "  python scripts/inspect_diagnostics.py /tmp/gs_diag_*.json"
+echo ""
+echo "Inspect failed plans:"
+echo "  ls /tmp/gs_failed_plans_*/"
+echo "  cat /tmp/gs_failed_plans_goals/*.json | python -m json.tool"

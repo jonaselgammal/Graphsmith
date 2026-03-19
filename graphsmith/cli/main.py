@@ -823,6 +823,7 @@ def eval_planner(
     save_diagnostics: Optional[str] = typer.Option(None, "--save-diagnostics", help="Save per-goal diagnostics JSON."),
     compare_retrieval: bool = typer.Option(False, "--compare-retrieval", help="Compare all retrieval modes."),
     delay: float = typer.Option(0.0, "--delay", help="Seconds to wait between goals (rate-limit protection)."),
+    save_failed_plans: Optional[str] = typer.Option(None, "--save-failed-plans", help="Save failed plan artifacts to this directory."),
 ) -> None:
     """Evaluate planner quality against a set of known goals."""
     from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
@@ -892,6 +893,26 @@ def eval_planner(
             json.dumps(diags, indent=2) + "\n", encoding="utf-8",
         )
         typer.secho(f"Diagnostics saved: {save_diagnostics}", fg=typer.colors.CYAN, err=True)
+
+    if save_failed_plans:
+        failed_dir = Path(save_failed_plans)
+        failed_dir.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for r in report.results:
+            if r.status != "pass" and r.plan_json:
+                slug = r.goal[:40].replace(" ", "_").replace("/", "_")
+                fp = failed_dir / f"{slug}.json"
+                fp.write_text(json.dumps({
+                    "goal": r.goal,
+                    "status": r.status,
+                    "failure_type": r.failure_type,
+                    "error": r.error,
+                    "holes": r.holes,
+                    "checks": r.checks.model_dump(),
+                    "plan": r.plan_json,
+                }, indent=2) + "\n", encoding="utf-8")
+                count += 1
+        typer.secho(f"Failed plans saved: {count} files in {save_failed_plans}", fg=typer.colors.CYAN, err=True)
 
     if output_format == "json":
         typer.echo(json.dumps(report.model_dump(), indent=2))
