@@ -43,6 +43,12 @@ def analyze_plan(path: Path) -> dict:
         src_scope = src.split(".")[0] if "." in src else src
         dst_scope = dst.split(".")[0] if "." in dst else dst
 
+        # Self-loop check
+        if src == dst:
+            issues.append(f"SELF-LOOP: '{src}' → '{dst}'")
+        elif src_scope == dst_scope and src_scope in node_ids:
+            issues.append(f"SELF-LOOP (same node): '{src}' → '{dst}'")
+
         if "." not in src:
             issues.append(f"BARE source: '{src}' → {dst}")
         elif src_scope not in ("input",) and src_scope not in node_ids:

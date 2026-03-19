@@ -55,8 +55,10 @@ Rules:
   IF the goal says "format", "list", "header", "present", or "bullet" → you MUST
   add the appropriate formatting/joining/rendering node(s). Do not skip them.
   IF the goal does NOT mention formatting → do NOT add formatting nodes.
+  "find topics", "find key topics", "extract keywords" → NO formatting. 1 node only.
   Examples:
     "Extract keywords" → 1 node (extract only), output "keywords"
+    "Find the key topics" → 1 node (extract only), output "keywords"
     "Extract keywords and format as a list" → 2 nodes (extract + join_lines)
     "Extract keywords and add a header saying Results" → 2 nodes (extract + template.render)
 - CONSTANTS: fixed strings from the goal (e.g. "Results", "Summary:") are constants.
@@ -77,6 +79,8 @@ Rules:
   filesystem_read, filesystem_write, memory_read, memory_write.
   If unsure, use "pure" for non-LLM skills. Do NOT invent effects.
 - EDGE CONFLICTS: each destination port can only receive from ONE source edge.
+- NO SELF-LOOPS: never wire a node's port back to itself (e.g. "format.prefix → format.prefix").
+  If a port needs a constant value, put it in config.template instead.
   Do NOT wire two different edges to the same "node.port".
 
 Use real names and types derived from the goal and available skills.
