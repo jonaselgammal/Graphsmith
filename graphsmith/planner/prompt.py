@@ -38,6 +38,9 @@ Rules:
   "find topics" / "list keywords" = extract keywords (output: keywords)
   "write a summary" / "condense" = summarize (output: summary)
   If the goal mentions an action by ANY name, the result is a requested deliverable.
+  These mappings apply even in multi-step goals. "Clean up, extract topics, and
+  format with a header" = normalize + extract_keywords + formatting = 3 steps.
+  Do NOT skip the cleanup/normalize step just because other steps follow it.
 - When the goal lists multiple actions with "and" or commas ("X, Y, and Z"),
   each action names a deliverable the user wants back.
 - ALWAYS name each output using the skill's actual output port name, even if the
