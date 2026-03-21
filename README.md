@@ -121,6 +121,63 @@ graphsmith eval-planner \
 Stability on Llama 3.1 8B (3 runs): 28/36 goals always pass, 0 always fail,
 8 intermittent (output naming noise).
 
+## Interactive mode
+
+```bash
+graphsmith run-interactive
+```
+
+Plan workflows interactively. Type a goal, inspect candidates, compare alternatives:
+
+```
+  Graphsmith Interactive
+  Provider: anthropic | Model: claude-haiku-4-5-20251001
+  Backend: IR (3 candidates, decomposition: on)
+  Type :help for commands
+
+  > extract keywords from this text
+
+  Planning...
+
+  Plan Summary
+  ----------------------------------------
+  Steps:
+    1. extract (text.extract_keywords.v1)
+  Outputs:
+    - keywords <- extract.keywords
+  Effects: llm_inference
+
+  (3 candidates compiled, :candidates to inspect, :compare to diff)
+
+  > :candidates
+
+  Candidate 1: ✔ SELECTED
+    steps: extract
+    outputs: keywords
+    score: 115
+
+  Candidate 2:
+    steps: extract → format
+    outputs: joined
+    score: 80
+
+  > :compare
+
+  Selected (Candidate 1)
+    steps: extract
+    score: 115
+
+  Alternative (Candidate 2)
+    steps: extract → format
+    score: 80
+
+  Differences:
+    alternative has: text.join_lines.v1
+    score delta: +35
+```
+
+Commands: `:help`, `:candidates`, `:compare`, `:decomposition`, `:rerun`, `:history`, `:quit`.
+
 ## Project structure
 
 ```

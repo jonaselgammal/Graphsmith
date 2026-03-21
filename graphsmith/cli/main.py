@@ -161,11 +161,13 @@ def run_interactive(
     provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
     model: Optional[str] = typer.Option(None, "--model", help="Model name."),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible."),
+    candidates: int = typer.Option(3, "--candidates", help="Number of IR candidates."),
+    decompose: bool = typer.Option(True, "--decompose/--no-decompose", help="Enable semantic decomposition."),
 ) -> None:
-    """Plan a workflow from a natural language goal (interactive).
+    """Interactive planning session with candidate inspection.
 
-    Asks for a goal, plans it using the IR pipeline with decomposition +
-    reranking, and prints a human-readable summary.
+    Type a natural language goal to plan it. Use :help to see commands
+    for inspecting candidates, comparing alternatives, and rerunning.
     """
     import tempfile
     from pathlib import Path
@@ -208,51 +210,13 @@ def run_interactive(
         raise typer.Exit(code=1) from exc
 
     from graphsmith.planner.ir_backend import IRPlannerBackend
-    backend = IRPlannerBackend(llm, candidate_count=3, use_decomposition=True)
+    from graphsmith.cli.interactive import InteractiveSession
 
-    typer.echo("")
-    typer.echo(f"  Graphsmith (provider: {provider}, model: {model})")
-    typer.echo(f"  Type a goal, or 'quit' to exit.")
-    typer.echo("")
-
-    while True:
-        try:
-            goal = typer.prompt("  Goal")
-        except (KeyboardInterrupt, EOFError):
-            typer.echo("")
-            break
-
-        goal = goal.strip()
-        if not goal or goal.lower() in ("quit", "exit", "q"):
-            break
-
-        typer.echo("")
-        typer.echo("  Planning...")
-
-        from graphsmith.planner.candidates import retrieve_candidates
-        from graphsmith.planner.models import PlanRequest
-
-        try:
-            cands = retrieve_candidates(goal, reg)
-            request = PlanRequest(goal=goal, candidates=cands)
-            result = backend.compose(request)
-        except Exception as exc:
-            typer.secho(f"  Error: {exc}", fg=typer.colors.RED, err=True)
-            typer.echo("")
-            continue
-
-        if result.status == "failure" or result.graph is None:
-            typer.secho("  Planning failed.", fg=typer.colors.RED)
-            if result.holes:
-                for h in result.holes[:2]:
-                    typer.echo(f"    {h.description[:120]}")
-            typer.echo("")
-            continue
-
-        # Print summary
-        typer.echo("")
-        typer.echo(f"  {_summarize_plan(result.graph)}")
-        typer.echo("")
+    backend = IRPlannerBackend(llm, candidate_count=candidates, use_decomposition=decompose)
+    session = InteractiveSession(
+        backend, reg, provider_name=provider, model_name=model,
+    )
+    session.run()
 
 
 @app.command("list-models")
