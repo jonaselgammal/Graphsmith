@@ -1,8 +1,40 @@
 # Changelog
 
+## 1.0.0
+
+### Planning IR Architecture
+- Semantic Planning IR: LLM emits structured intent (steps, sources, config),
+  compiler deterministically lowers to executable graphs
+- Deterministic compiler: step name sanitization, type normalization, edge
+  construction, DAG validation — no raw graph editing by LLM
+- Semantic decomposition: optional stage that classifies goals into content
+  transforms + presentation intent before IR generation
+- Multi-candidate reranking: generate N IR candidates, score with deterministic
+  semantic scorer, select best valid candidate
+- IR prompt versioning (ir-v3) with step count guidance, paraphrase mapping,
+  and output naming rules
+
+### Evaluation
+- 36 evaluation goals across 3 sets (benchmark, holdout, challenge)
+- Claude Haiku: 36/36 (100%)
+- Llama 3.1 8B: ~86-94% with decomposition + reranking
+- Stability harness: repeated-run measurement with per-goal stability tracking
+- Candidate-level dataset pipeline for reranking analysis
+
+### Infrastructure
+- .env file support for API key management
+- OpenAI-compatible provider fallback for GRAPHSMITH_GROQ_API_KEY
+- Trace export (JSONL) with decomposition, candidates, scores
+- Comparison scripts for direct vs IR planner evaluation
+- 928 tests
+
+### Skills
+- 15 skill packages: text processing, JSON extraction, formatting
+- Includes distractor skills for challenge evaluation
+
 ## 0.2.0
 
-### Spec and Runtime (Sprints 01–02)
+### Spec and Runtime (Sprints 01-02)
 - Pydantic v2 models for skill contracts, graph bodies, and examples
 - YAML package loader with validation
 - Deterministic topological executor with value-binding semantics
@@ -15,68 +47,26 @@
 - Filesystem-based registry with JSON index
 - Publish, fetch, search with text + metadata filters
 - skill.invoke for recursive sub-skill execution
-- Recursion depth protection and self-recursion detection
 
 ### Planner (Sprint 04)
 - Mock planner backend with candidate retrieval
 - GlueGraph model (task-specific, not publishable)
 - Unresolved hole reporting
-- Validation of planner output via synthetic SkillPackage
 - CLI: plan
 
 ### Traces and Promotion (Sprint 05)
-- Trace persistence (one JSON file per run)
-- Trace listing, viewing, and summary
-- Trace pruning by age
-- array.map and array.filter ops
+- Trace persistence, listing, viewing, pruning
 - Promotion candidate mining via op-sequence signature matching
-- CLI: traces-list, traces-show, traces-prune, promote-candidates
-
-### Integration Hardening (Sprint 06)
-- parallel.map with sequential fallback semantics
-- All 12 primitive ops implemented
-- CLI: version, list-ops
-
-### Plan Execution (Sprint 07)
-- LLM planner output parser (JSON extraction from raw text)
-- Plan-and-run (plan + validate + execute in one step)
-- Save/load plans as first-class GlueGraph JSON
-- CLI: plan-and-run, run-plan, plan --save
 
 ### Provider Integration (Sprint 08)
 - AnthropicProvider and OpenAICompatibleProvider via httpx
 - Provider factory with env-var configuration
-- Model discovery (list-models)
-- Actionable error messages for model-not-found, auth failures
-- Structured planning prompt with versioning (v3)
-- Provider-level JSON output hints
-- Robust parser: handles code fences, surrounding prose, balanced-brace extraction
-- CLI: list-models, --provider, --model, --base-url
-
-### Real LLM Validation (Sprint 09)
-- Gated smoke tests for Anthropic and OpenAI providers
-- End-to-end plan-and-run with real provider
-- CLI: version, list-ops
+- Robust parser: code fences, balanced-brace extraction
 
 ### Multi-Skill Library (Sprint 10)
-- 4 new example skills: text.normalize.v1, text.extract_keywords.v1,
-  json.reshape.v1, text.join_lines.v1
-- Multi-skill composition tests
-- Publish-time dependency warnings
-- Type grammar alignment (array<string> enforcement)
-- Placeholder token elimination from planning prompts
-- Output mapping completeness validation
-- Required-input satisfiability pre-check at execution time
-- Optional input semantics (graceful skip for absent optional bindings)
-- Conflicting binding detection at validation time
-- --save-on-failure for debugging failed plans
-
-### Release Polish (Sprint 11)
-- Version bumped to 0.2.0
-- README rewritten as project landing page
-- Architecture diagram (Mermaid)
-- Example workflows documentation
-- Changelog
+- 4 initial example skills
+- Multi-skill composition
+- Optional input semantics
 
 ## 0.1.0
 

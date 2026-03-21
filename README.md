@@ -173,8 +173,10 @@ pytest -x           # stop on first failure
 
 - [Architecture (v1)](docs/GRAPHSMITH_ARCHITECTURE_V1.md) — full system design
 - [Running evaluations](docs/RUNNING_EVALS.md) — how to reproduce results
+- [Debugging and traces](docs/DEBUGGING_AND_TRACES.md) — inspecting failures
 - [IR architecture](docs/PLANNING_IR_ARCHITECTURE.md) — IR design rationale
 - [Evaluation comparison](docs/IR_EVAL_COMPARISON.md) — sprint-by-sprint results
+- [Changelog](CHANGELOG.md) — version history
 - [Why Graphsmith](docs/WHY_GRAPHSMITH.md) — motivation
 
 ## License
