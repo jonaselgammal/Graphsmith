@@ -533,7 +533,7 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert "graphsmith" in result.output
-    assert "0.2.0" in result.output
+    assert "1.0.0" in result.output
 
 
 def test_list_ops() -> None:

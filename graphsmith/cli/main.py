@@ -18,7 +18,25 @@ from graphsmith.exceptions import (
 from graphsmith.parser import load_skill_package
 from graphsmith.validator import validate_skill_package
 
-app = typer.Typer(help="Graphsmith CLI")
+def _version_callback(value: bool) -> None:
+    if value:
+        from graphsmith import __version__
+        typer.echo(f"graphsmith {__version__}")
+        raise typer.Exit()
+
+
+app = typer.Typer(
+    help="Graphsmith — semantic planner + compiler for graph-based AI workflows.",
+    callback=lambda version: None,
+)
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(False, "--version", "-V", help="Print version and exit.",
+                                  callback=_version_callback, is_eager=True),
+) -> None:
+    """Graphsmith CLI."""
 
 
 # ── version / list-ops ───────────────────────────────────────────────
@@ -809,11 +827,11 @@ def eval_planner(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Registry root with published skills.",
     ),
-    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock, llm, or ir."),
+    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock, llm (direct graph), or ir (semantic IR + compiler + reranking)."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
-    provider: str = typer.Option("echo", "--provider", help="LLM provider."),
-    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
-    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name (e.g. claude-haiku-4-5-20251001, llama-3.1-8b-instant)."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible providers (e.g. https://api.groq.com/openai/v1)."),
     save_results: Optional[str] = typer.Option(
         None, "--save-results",
         help="Save results JSON to this path.",
@@ -824,10 +842,13 @@ def eval_planner(
     compare_retrieval: bool = typer.Option(False, "--compare-retrieval", help="Compare all retrieval modes."),
     delay: float = typer.Option(0.0, "--delay", help="Seconds to wait between goals (rate-limit protection)."),
     save_failed_plans: Optional[str] = typer.Option(None, "--save-failed-plans", help="Save failed plan artifacts to this directory."),
-    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates for reranking (IR backend only)."),
-    use_decomposition: bool = typer.Option(False, "--decompose", help="Enable semantic decomposition stage (IR backend only)."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates to generate and rerank. Use 3 for best results (IR backend only)."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition stage before IR generation. Improves planning quality (IR backend only)."),
 ) -> None:
-    """Evaluate planner quality against a set of known goals."""
+    """Evaluate planner quality against a set of known goals.
+
+    Recommended: --backend ir --ir-candidates 3 --decompose
+    """
     from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
     from graphsmith.registry import LocalRegistry
 

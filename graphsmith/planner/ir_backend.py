@@ -1,8 +1,6 @@
 """IR-based planner backend — LLM emits IR, compiler lowers to graph."""
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 from graphsmith.exceptions import ProviderError
