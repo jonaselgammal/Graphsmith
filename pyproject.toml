@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graphsmith"
-version = "0.2.0"
+version = "1.0.0"
 description = "Typed contract-based subgraph standard with deterministic runtime, local registry, and LLM planner"
 readme = "README.md"
 license = {text = "MIT"}

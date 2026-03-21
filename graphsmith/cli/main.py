@@ -57,6 +57,204 @@ def list_ops() -> None:
         typer.echo(op)
 
 
+# ── doctor ───────────────────────────────────────────────────────────
+
+
+@app.command()
+def doctor() -> None:
+    """Check system readiness: Python, dependencies, API keys."""
+    import os
+    import sys
+
+    ok_count = 0
+    fail_count = 0
+
+    def _ok(msg: str) -> None:
+        nonlocal ok_count
+        ok_count += 1
+        typer.echo(f"  \u2714 {msg}")
+
+    def _fail(msg: str) -> None:
+        nonlocal fail_count
+        fail_count += 1
+        typer.secho(f"  \u2716 {msg}", fg=typer.colors.RED)
+
+    typer.echo("")
+    typer.echo("  Graphsmith Doctor")
+    typer.echo("  =================")
+    typer.echo("")
+
+    # Python version
+    v = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if sys.version_info >= (3, 11):
+        _ok(f"Python {v}")
+    else:
+        _fail(f"Python {v} (need >= 3.11)")
+
+    # Core dependencies
+    for pkg, label in [("pydantic", "pydantic"), ("typer", "typer"), ("yaml", "PyYAML"), ("httpx", "httpx")]:
+        try:
+            __import__(pkg)
+            _ok(f"{label} installed")
+        except ImportError:
+            _fail(f"{label} not installed (pip install -e '.[dev]')")
+
+    # .env file
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if env_path.is_file():
+        _ok(".env file found")
+    else:
+        _fail(".env file not found (cp .env.example .env)")
+
+    # API keys
+    # Trigger .env loading
+    try:
+        from graphsmith.ops.providers import _load_dotenv
+        _load_dotenv()
+    except Exception:
+        pass
+
+    anthropic_key = os.environ.get("GRAPHSMITH_ANTHROPIC_API_KEY", "")
+    groq_key = os.environ.get("GRAPHSMITH_GROQ_API_KEY", "")
+    openai_key = os.environ.get("GRAPHSMITH_OPENAI_API_KEY", "")
+
+    if anthropic_key:
+        _ok("Anthropic API key set")
+    else:
+        _fail("Anthropic API key missing (GRAPHSMITH_ANTHROPIC_API_KEY)")
+
+    if groq_key or openai_key:
+        label = "Groq" if groq_key else "OpenAI"
+        _ok(f"{label} API key set")
+    else:
+        _fail("No Groq/OpenAI key (GRAPHSMITH_GROQ_API_KEY or GRAPHSMITH_OPENAI_API_KEY)")
+
+    has_any_key = bool(anthropic_key or groq_key or openai_key)
+
+    # Skills
+    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
+    if skills_dir.is_dir():
+        count = sum(1 for d in skills_dir.iterdir() if d.is_dir())
+        _ok(f"{count} example skills found")
+    else:
+        _fail("examples/skills/ not found")
+
+    # Summary
+    typer.echo("")
+    if fail_count == 0:
+        typer.secho("  All checks passed. System is ready.", fg=typer.colors.GREEN)
+    elif has_any_key:
+        typer.secho(f"  {ok_count} passed, {fail_count} issue(s). System is partially ready.",
+                    fg=typer.colors.YELLOW)
+    else:
+        typer.secho(f"  {ok_count} passed, {fail_count} issue(s). Fix the issues above.",
+                    fg=typer.colors.RED)
+    typer.echo("")
+
+
+# ── run (interactive) ────────────────────────────────────────────────
+
+
+@app.command("run-interactive")
+def run_interactive(
+    provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible."),
+) -> None:
+    """Plan a workflow from a natural language goal (interactive).
+
+    Asks for a goal, plans it using the IR pipeline with decomposition +
+    reranking, and prints a human-readable summary.
+    """
+    import tempfile
+    from pathlib import Path
+
+    # Resolve model default
+    if model is None:
+        if provider == "anthropic":
+            model = "claude-haiku-4-5-20251001"
+        elif provider == "openai":
+            model = "llama-3.1-8b-instant"
+        else:
+            model = "default"
+
+    # Build registry
+    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
+    if not skills_dir.is_dir():
+        typer.secho("ERROR: examples/skills/ not found.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    reg_dir = tempfile.mkdtemp()
+    from graphsmith.registry.local import LocalRegistry
+    from graphsmith.parser import load_skill_package
+
+    reg = LocalRegistry(reg_dir)
+    for d in sorted(skills_dir.iterdir()):
+        if d.is_dir() and (d / "skill.yaml").exists():
+            try:
+                pkg = load_skill_package(str(d))
+                reg.publish(pkg)
+            except Exception:
+                pass
+
+    # Build backend
+    try:
+        from graphsmith.ops.providers import create_provider
+        llm = create_provider(provider, model=model, base_url=base_url)
+    except Exception as exc:
+        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
+        typer.echo("Run 'graphsmith doctor' to check your setup.", err=True)
+        raise typer.Exit(code=1) from exc
+
+    from graphsmith.planner.ir_backend import IRPlannerBackend
+    backend = IRPlannerBackend(llm, candidate_count=3, use_decomposition=True)
+
+    typer.echo("")
+    typer.echo(f"  Graphsmith (provider: {provider}, model: {model})")
+    typer.echo(f"  Type a goal, or 'quit' to exit.")
+    typer.echo("")
+
+    while True:
+        try:
+            goal = typer.prompt("  Goal")
+        except (KeyboardInterrupt, EOFError):
+            typer.echo("")
+            break
+
+        goal = goal.strip()
+        if not goal or goal.lower() in ("quit", "exit", "q"):
+            break
+
+        typer.echo("")
+        typer.echo("  Planning...")
+
+        from graphsmith.planner.candidates import retrieve_candidates
+        from graphsmith.planner.models import PlanRequest
+
+        try:
+            cands = retrieve_candidates(goal, reg)
+            request = PlanRequest(goal=goal, candidates=cands)
+            result = backend.compose(request)
+        except Exception as exc:
+            typer.secho(f"  Error: {exc}", fg=typer.colors.RED, err=True)
+            typer.echo("")
+            continue
+
+        if result.status == "failure" or result.graph is None:
+            typer.secho("  Planning failed.", fg=typer.colors.RED)
+            if result.holes:
+                for h in result.holes[:2]:
+                    typer.echo(f"    {h.description[:120]}")
+            typer.echo("")
+            continue
+
+        # Print summary
+        typer.echo("")
+        typer.echo(f"  {_summarize_plan(result.graph)}")
+        typer.echo("")
+
+
 @app.command("list-models")
 def list_models(
     provider: str = typer.Option(
@@ -1065,6 +1263,22 @@ def _make_planner_backend(
         )
 
     return LLMPlannerBackend(provider=llm)
+
+
+def _summarize_plan(glue: Any) -> str:
+    """Format a GlueGraph as a human-readable plan summary."""
+    lines = []
+    lines.append("Plan Summary")
+    lines.append("  Steps:")
+    for i, node in enumerate(glue.graph.nodes, 1):
+        skill = node.config.get("skill_id", node.op)
+        lines.append(f"    {i}. {node.id} ({skill})")
+    lines.append("  Outputs:")
+    for name, addr in glue.graph.outputs.items():
+        lines.append(f"    - {name} \u2190 {addr}")
+    if glue.effects:
+        lines.append(f"  Effects: {', '.join(glue.effects)}")
+    return "\n  ".join(lines)
 
 
 def _print_plan_problems(result: Any, goal: str) -> None:

@@ -37,18 +37,34 @@ The compiler handles all graph mechanics deterministically.
 ## Quickstart
 
 ```bash
-# Install
-pip install -e ".[dev]"
+git clone https://github.com/jonaselgammal/Graphsmith.git
+cd Graphsmith
 
-# Create a .env file with your API key (gitignored)
+# Install (creates .venv, installs deps, sets up .env)
+./scripts/install.sh
+
+# Activate and verify
+source .venv/bin/activate
+graphsmith doctor
+
+# Add your API key to .env, then:
+graphsmith run-interactive
+```
+
+### Manual install
+
+```bash
+pip install -e ".[dev]"
 cp .env.example .env
 # Edit .env: GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
+```
 
-# Publish all skills
+### Run evaluation
+
+```bash
 REG=$(mktemp -d)
-for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG"; done
+for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG" 2>/dev/null; done
 
-# Run the full evaluation (recommended configuration)
 graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
   --backend ir --ir-candidates 3 --decompose \
   --provider anthropic --model claude-haiku-4-5-20251001 --delay 2
