@@ -7,6 +7,12 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import sklearn  # noqa: F401
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
 from graphsmith.evaluation.reranker_dataset import (
     FEATURE_NAMES,
     CandidateRow,
@@ -119,6 +125,7 @@ class TestDatasetExportImport:
 # ── Learned reranker training ──────────────────────────────────────
 
 
+@pytest.mark.skipif(not HAS_SKLEARN, reason="scikit-learn not installed")
 class TestLearnedReranker:
     def _make_training_rows(self) -> list[CandidateRow]:
         """Create synthetic training data with clear signal."""

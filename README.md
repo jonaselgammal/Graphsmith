@@ -10,11 +10,29 @@ Llama 3.1 8B: **~86-94%** with reranking + decomposition.
 
 No public servers. Everything runs locally.
 
-## Key idea
+## How it works
 
-```
-goal → decompose → generate IR candidates → score → compile → validate → execute
-         (LLM)         (LLM × N)         (rules)  (deterministic)
+```mermaid
+flowchart TD
+    Goal["Natural Language Goal"] --> Decompose
+
+    subgraph LLM ["LLM (semantic reasoning)"]
+        Decompose["Semantic<br/>Decomposition"] --> Generate["IR Candidate<br/>Generation (×N)"]
+    end
+
+    Generate --> Score
+
+    subgraph GS ["Graphsmith (deterministic)"]
+        Score["Scoring +<br/>Reranking"] --> Compile["Deterministic<br/>Compiler"]
+        Compile --> Validate["Validation<br/>(types · DAG · bindings)"]
+    end
+
+    Validate --> Graph["Validated<br/>Executable Graph"]
+
+    style LLM fill:#eef2ff,stroke:#818cf8
+    style GS fill:#fefce8,stroke:#eab308
+    style Goal fill:#f0fdf4,stroke:#22c55e
+    style Graph fill:#f0fdf4,stroke:#22c55e
 ```
 
 1. **Decomposition** — LLM classifies the goal into content transforms + presentation intent
