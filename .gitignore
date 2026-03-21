@@ -29,7 +29,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Secrets (never commit)
+.env
+
 # Graphsmith local state (never commit these)
 .graphsmith/
 evaluation/results*.json
+data/
 docs/SPRINT_*

@@ -469,7 +469,7 @@ def plan_and_run(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Custom registry root.",
     ),
-    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock or llm."),
+    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock, llm, or ir."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM ops."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai."),
     model: Optional[str] = typer.Option(None, "--model", help="Model name."),
@@ -809,7 +809,7 @@ def eval_planner(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Registry root with published skills.",
     ),
-    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock or llm."),
+    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock, llm, or ir."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider."),
     model: Optional[str] = typer.Option(None, "--model", help="Model name."),
@@ -824,6 +824,8 @@ def eval_planner(
     compare_retrieval: bool = typer.Option(False, "--compare-retrieval", help="Compare all retrieval modes."),
     delay: float = typer.Option(0.0, "--delay", help="Seconds to wait between goals (rate-limit protection)."),
     save_failed_plans: Optional[str] = typer.Option(None, "--save-failed-plans", help="Save failed plan artifacts to this directory."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates for reranking (IR backend only)."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Enable semantic decomposition stage (IR backend only)."),
 ) -> None:
     """Evaluate planner quality against a set of known goals."""
     from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
@@ -832,6 +834,7 @@ def eval_planner(
     reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
+        ir_candidates=ir_candidates, use_decomposition=use_decomposition,
     )
 
     goals = load_goals(goals_dir)
@@ -839,7 +842,7 @@ def eval_planner(
         typer.secho("No goal files found.", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
 
-    prov_name = provider if backend == "llm" else "mock"
+    prov_name = provider if backend in ("llm", "ir") else "mock"
     mod_name = model or ""
 
     if compare_retrieval:
@@ -1011,11 +1014,13 @@ def _make_planner_backend(
     provider: str = "echo",
     model: str | None = None,
     base_url: str | None = None,
+    ir_candidates: int = 1,
+    use_decomposition: bool = False,
 ) -> Any:
     """Build a planner backend from CLI flags."""
     from graphsmith.planner import LLMPlannerBackend, MockPlannerBackend
 
-    if backend != "llm":
+    if backend not in ("llm", "ir"):
         return MockPlannerBackend()
 
     # Build the LLM provider
@@ -1029,6 +1034,14 @@ def _make_planner_backend(
         except (ProviderConfigError, ProviderError) as exc:
             typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from exc
+
+    if backend == "ir":
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+        return IRPlannerBackend(
+            provider=llm,
+            candidate_count=ir_candidates,
+            use_decomposition=use_decomposition,
+        )
 
     return LLMPlannerBackend(provider=llm)
 

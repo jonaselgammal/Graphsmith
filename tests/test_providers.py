@@ -55,6 +55,7 @@ class TestCreateProvider:
 
     def test_openai_no_key_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("GRAPHSMITH_OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GRAPHSMITH_GROQ_API_KEY", raising=False)
         with pytest.raises(ProviderConfigError, match="API key"):
             create_provider("openai")
 

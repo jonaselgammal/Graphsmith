@@ -7,10 +7,29 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 from graphsmith.exceptions import GraphsmithError, ProviderError
 from graphsmith.ops.llm_provider import LLMProvider
+
+
+def _load_dotenv() -> None:
+    """Load .env file from project root if it exists. No dependencies needed."""
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 
 class ProviderConfigError(GraphsmithError):
@@ -175,11 +194,15 @@ class OpenAICompatibleProvider:
         base_url: str | None = None,
         max_tokens: int = 4096,
     ) -> None:
-        self.api_key = api_key or os.environ.get("GRAPHSMITH_OPENAI_API_KEY", "")
+        self.api_key = (
+            api_key
+            or os.environ.get("GRAPHSMITH_OPENAI_API_KEY", "")
+            or os.environ.get("GRAPHSMITH_GROQ_API_KEY", "")
+        )
         if not self.api_key:
             raise ProviderConfigError(
                 "OpenAI API key not found. "
-                "Set GRAPHSMITH_OPENAI_API_KEY or pass api_key."
+                "Set GRAPHSMITH_OPENAI_API_KEY (or GRAPHSMITH_GROQ_API_KEY) or pass api_key."
             )
         self.model = model or self.DEFAULT_MODEL
         self.max_tokens = max_tokens

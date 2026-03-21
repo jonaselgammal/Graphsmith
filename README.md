@@ -1,349 +1,181 @@
 # Graphsmith
 
-**Forge reusable AI skill graphs.**
+**Semantic planner + compiler for graph-based AI workflows.**
 
-Graphsmith is a prototype for AI-native skill graphs.
+Graphsmith composes typed, executable skill graphs from natural language goals.
+An LLM plans *what* to do; Graphsmith deterministically compiles *how* to wire it.
 
-It explores whether LLMs can plan against reusable, typed, executable
-graph skills over a deterministic runtime — instead of relying only on
-ad hoc code generation or flat tool calls.
+Claude Haiku: **36/36 (100%)** on benchmark + holdout + challenge.
+Llama 3.1 8B: **~86-94%** with reranking + decomposition.
 
-No public servers. No API keys required for core functionality.
-Everything runs locally. On the current benchmark and holdout task family,
-the real Anthropic planner reaches **100% structural pass rate** (24/24 goals).
+No public servers. Everything runs locally.
 
-## Core concepts
+## Key idea
 
-| Concept | What it is |
-|---------|-----------|
-| **SkillGraph** | A reusable, versioned subgraph with typed inputs, outputs, declared effects, and an executable DAG body. Published to the registry. |
-| **GlueGraph** | A task-specific composition created by the planner. References published skills via `skill.invoke`. Ephemeral — not automatically published. |
-| **Registry** | A local filesystem store where skills are published, searched, and fetched by exact `(id, version)`. |
-| **Validator** | Deterministic checks: types, ops, edges, DAG structure, binding conflicts, output completeness. Runs before execution. |
-| **Runtime** | Topological executor with a flat value store. Deterministic except for LLM provider output. Supports nested `skill.invoke`. |
-| **Planner** | Retrieves candidate skills from the registry, builds a prompt, calls an LLM provider, parses the response into a typed `GlueGraph`. |
-| **Traces** | One JSON file per execution. Records node-level timing, inputs, outputs, and nested child traces. |
-| **Promotion** | Mines stored traces for repeated op-sequence patterns and flags them as candidates for extraction into reusable skills. |
-
-## How Graphsmith works
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e8f4f8', 'primaryTextColor': '#1a1a1a', 'primaryBorderColor': '#4a90d9', 'lineColor': '#555555', 'secondaryColor': '#f0f0f0', 'tertiaryColor': '#ffffff', 'background': '#ffffff', 'mainBkg': '#ffffff', 'nodeBorder': '#4a90d9', 'clusterBkg': '#f8f9fa', 'clusterBorder': '#cccccc', 'titleColor': '#1a1a1a', 'edgeLabelBackground': '#ffffff'}}}%%
-flowchart TD
-    Goal["User Goal<br/>(natural language)"] --> Planner
-
-    subgraph Planner ["Planner Layer"]
-        Candidates["Candidate<br/>Retrieval"] --> PromptBuilder["Prompt<br/>Builder"]
-        PromptBuilder --> LLMProvider["LLM Provider<br/>(Anthropic / OpenAI / Echo)"]
-        LLMProvider --> Parser["Output Parser"]
-    end
-
-    Registry["Local Registry<br/>(publish / search / fetch)"] --> Candidates
-
-    Parser --> GlueGraph["GlueGraph<br/>(task-specific plan)"]
-
-    GlueGraph --> Validator
-
-    subgraph Validator ["Validation"]
-        StructCheck["Structure<br/>Types · Ops · Edges"]
-        DAGCheck["DAG Check"]
-        BindingCheck["Binding<br/>Conflicts"]
-    end
-
-    Validator --> Runtime
-
-    subgraph Runtime ["Deterministic Runtime"]
-        TopoSort["Topological<br/>Sort"] --> Executor["Node<br/>Executor"]
-        Executor --> |"skill.invoke"| SubSkill["Sub-Skill<br/>Execution"]
-        SubSkill --> Executor
-    end
-
-    SkillPackages["Reusable Skill<br/>Packages<br/>(YAML)"] --> Registry
-    SkillPackages --> Validator
-    SkillPackages --> Runtime
-
-    Runtime --> Outputs["Execution<br/>Outputs"]
-    Runtime --> Traces["Execution<br/>Traces"]
-
-    Traces --> Promotion["Promotion<br/>Candidate Mining"]
-
-    style GlueGraph fill:#fff3cd,stroke:#aa8800,color:#1a1a1a
-    style SkillPackages fill:#d4edda,stroke:#28a745,color:#1a1a1a
-    style Registry fill:#cce5ff,stroke:#0066cc,color:#1a1a1a
+```
+goal → decompose → generate IR candidates → score → compile → validate → execute
+         (LLM)         (LLM × N)         (rules)  (deterministic)
 ```
 
-See [docs/ARCHITECTURE_DIAGRAM.md](docs/ARCHITECTURE_DIAGRAM.md) for the full diagram set.
+1. **Decomposition** — LLM classifies the goal into content transforms + presentation intent
+2. **IR generation** — LLM produces N candidate plans as semantic IR (steps, data flow, config)
+3. **Scoring** — deterministic semantic scorer ranks candidates
+4. **Compilation** — compiler lowers IR to executable graph (edges, node IDs, outputs)
+5. **Validation** — structural checks (types, DAG, bindings) before execution
 
-## Canonical demo
+The LLM never serializes raw graph structures. It only describes semantic intent.
+The compiler handles all graph mechanics deterministically.
 
-The full Graphsmith pipeline. Copy-paste to try it.
+## Current capabilities
+
+- **Text pipelines**: normalize, summarize, extract keywords, title case, word count, sentiment
+- **JSON extraction**: reshape, extract field
+- **Formatting**: join lines (lists), template rendering (headers), prefix lines
+- **Multi-step workflows**: chains, fan-out, multi-output goals
+- **15 skills**, 36 evaluation goals across 3 test sets
+
+## Quickstart
 
 ```bash
+# Install
 pip install -e ".[dev]"
+
+# Create a .env file with your API key (gitignored)
+cp .env.example .env
+# Edit .env: GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
+
+# Publish all skills
 REG=$(mktemp -d)
-TRACES=$(mktemp -d)
+for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG"; done
+
+# Run the full evaluation (recommended configuration)
+graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
+  --backend ir --ir-candidates 3 --decompose \
+  --provider anthropic --model claude-haiku-4-5-20251001 --delay 2
 ```
 
-### Step 1: Publish skills
+## Recommended configuration
 
 ```bash
-graphsmith publish examples/skills/text.normalize.v1 --registry "$REG"
-graphsmith publish examples/skills/text.extract_keywords.v1 --registry "$REG"
-graphsmith publish examples/skills/text.summarize.v1 --registry "$REG"
+graphsmith eval-planner \
+  --backend ir \
+  --ir-candidates 3 \
+  --decompose \
+  --provider anthropic \
+  --model claude-haiku-4-5-20251001 \
+  --goals evaluation/goals \
+  --registry "$REG"
 ```
 
-### Step 2: Search the registry
+| Flag | Purpose |
+|------|---------|
+| `--backend ir` | Use IR pipeline (LLM → IR → compile), not raw graph emission |
+| `--ir-candidates 3` | Generate 3 candidates, pick best via semantic scoring |
+| `--decompose` | Add decomposition stage for semantic grounding |
+| `--provider anthropic` | Use Anthropic API |
+| `--model claude-haiku-4-5-20251001` | Fast, capable model |
 
-```bash
-graphsmith search "text" --registry "$REG"
+## Performance
+
+| Set | Goals | Claude Haiku | Llama 3.1 8B |
+|-----|-------|-------------|--------------|
+| Benchmark | 9 | 9/9 (100%) | 8-9/9 |
+| Holdout | 15 | 15/15 (100%) | 12-14/15 |
+| Challenge | 12 | 12/12 (100%) | 10-12/12 |
+| **Total** | **36** | **36/36 (100%)** | **~31-34/36 (86-94%)** |
+
+Stability on Llama 3.1 8B (3 runs): 28/36 goals always pass, 0 always fail,
+8 intermittent (output naming noise).
+
+## Project structure
+
 ```
-
-### Step 3: Run a saved multi-skill plan
-
-The repo includes pre-built plans in `examples/plans/` for reproducible demos.
-
-```bash
-graphsmith run-plan examples/plans/normalize_extract_keywords.json \
-  --input '{"text":"  AI   agents ARE transforming  SOFTWARE  "}' \
-  --mock-llm --registry "$REG" --trace-root "$TRACES"
+graphsmith/
+  planner/          IR pipeline: decomposition, prompt, parser, compiler, scorer
+  models/           Pydantic models (SkillGraph, GlueGraph, GraphBody)
+  validator/        Deterministic validation (types, DAG, bindings)
+  runtime/          Topological executor + value store
+  ops/              Primitive ops + LLM providers (Anthropic, OpenAI-compatible)
+  registry/         Local skill registry (publish, search, fetch)
+  evaluation/       Eval harness, stability analysis, candidate dataset
+  cli/              Typer CLI (20+ commands)
+  traces/           Execution trace persistence + promotion mining
+examples/skills/    15 skill packages
+evaluation/         36 eval goals (benchmark + holdout + challenge)
+scripts/            Eval runners, analysis tools, data collection
+tests/              922 tests
+docs/               Architecture and sprint documentation
 ```
-
-Output:
-```json
-{
-  "normalized": "ai agents are transforming software",
-  "keywords": "Extract the main keywords...ai agents are transforming software"
-}
-```
-
-The normalize step cleaned the text. The keyword extraction step sent it to the
-(mock) LLM. With a real provider, `keywords` would be e.g. `"AI agents, software"`.
-
-### Step 4: Plan your own workflow
-
-You can also generate plans from natural language:
-
-```bash
-graphsmith plan "normalize text" --registry "$REG" --save /tmp/my_plan.json
-graphsmith run-plan /tmp/my_plan.json \
-  --input '{"text":"hello"}' --mock-llm --registry "$REG"
-```
-
-### Step 5: Traces and promotion
-
-Run the plan a few times, then mine for patterns:
-
-```bash
-graphsmith run-plan examples/plans/normalize_extract_keywords.json \
-  --input '{"text":"second run"}' --mock-llm --registry "$REG" --trace-root "$TRACES"
-graphsmith run-plan examples/plans/normalize_extract_keywords.json \
-  --input '{"text":"third run"}' --mock-llm --registry "$REG" --trace-root "$TRACES"
-
-graphsmith traces-list --trace-root "$TRACES"
-graphsmith promote-candidates --trace-root "$TRACES"
-```
-
-### Step 6: Run a skill directly
-
-```bash
-graphsmith run examples/skills/text.normalize.v1 \
-  --input '{"text":"  AI   agents are transforming SOFTWARE engineering  "}'
-```
-
-Output:
-```json
-{"normalized": "ai agents are transforming software engineering"}
-```
-
-### Cleanup
-
-```bash
-rm -rf "$REG" "$TRACES"
-```
-
-A three-skill plan is also available: `examples/plans/normalize_summarize_keywords.json`.
-
-## Quick start
-
-```bash
-pip install -e ".[dev]"
-
-graphsmith version
-graphsmith list-ops
-
-# Validate and run a skill
-graphsmith validate examples/skills/text.normalize.v1
-graphsmith run examples/skills/text.normalize.v1 --input '{"text":"  Hello   World  "}'
-# → {"normalized": "hello world"}
-
-# Run a skill with mock LLM
-graphsmith run examples/skills/text.summarize.v1 \
-  --input '{"text":"Cats sleep a lot","max_sentences":2}' --mock-llm
-```
-
-## Visual plan inspector (local, read-only)
-
-```bash
-# Launch the local inspector UI in your browser
-graphsmith ui
-
-# Or inspect a plan from the command line
-graphsmith show-plan examples/plans/normalize_extract_keywords.json
-graphsmith render-plan examples/plans/normalize_extract_keywords.json --format mermaid
-```
-
-The inspector is a local-only, read-only tool for examining saved plans.
-Drag a plan JSON onto the page to see its graph: nodes, edges, inputs, outputs.
-Click nodes for details. Export to Mermaid for docs.
-No network access, no hosted backend — it is not a full visual editor or web UI.
-
-## LLM providers
-
-```bash
-# List available models
-export GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
-graphsmith list-models --provider anthropic
-
-# Plan with a real LLM
-graphsmith plan "normalize and extract keywords" \
-  --backend llm --provider anthropic \
-  --model claude-haiku-4-5-20251001 --registry "$REG"
-
-# Plan with OpenAI-compatible endpoint
-export GRAPHSMITH_OPENAI_API_KEY=sk-...
-graphsmith plan "normalize text" \
-  --backend llm --provider openai --registry "$REG"
-```
-
-Supported: `echo` (test double), `anthropic`, `openai` (compatible with Groq, Ollama, etc.).
-
-## Example skills
-
-| Skill | Description | Effects |
-|-------|-------------|---------|
-| `text.normalize.v1` | Lowercase, strip, collapse whitespace | pure |
-| `text.extract_keywords.v1` | Keyword extraction via LLM | llm_inference |
-| `text.summarize.v1` | Text summarization via LLM | llm_inference |
-| `json.reshape.v1` | Parse JSON + select fields | pure |
-| `text.join_lines.v1` | Format text with keyword prefix | pure |
-
-See [example workflows](docs/EXAMPLE_WORKFLOWS.md) for end-to-end usage.
 
 ## CLI commands
 
 | Command | Description |
 |---------|-------------|
+| `eval-planner` | Evaluate planner quality against goal sets |
+| `plan` | Generate a plan from a natural language goal |
+| `plan-and-run` | Plan + execute in one step |
+| `run-plan` | Run a saved plan |
+| `run` | Run a skill package directly |
+| `publish` | Publish a skill to the local registry |
+| `search` | Search published skills |
+| `validate` | Validate a skill package |
+| `ui` | Launch local plan inspector (browser) |
 | `version` | Print version |
-| `list-ops` | List primitive ops |
-| `list-models` | List provider models |
-| `validate <path>` | Validate a skill package |
-| `inspect <path>` | Print skill summary |
-| `schema <model>` | Export JSON Schema |
-| `run <path>` | Run a skill package |
-| `publish <path>` | Publish to local registry |
-| `search <query>` | Search published skills |
-| `show <id>` | Show skill details |
-| `plan <goal>` | Plan a glue graph |
-| `plan-and-run <goal>` | Plan + execute in one step |
-| `run-plan <path>` | Run a saved plan |
-| `traces-list` | List stored traces |
-| `traces-show <id>` | Show/summarize a trace |
-| `traces-prune` | Remove old traces |
-| `promote-candidates` | Find repeated patterns |
-| `show-plan <path>` | Show plan details (text) |
-| `render-plan <path>` | Render plan as Mermaid |
-| `ui` | Launch local plan inspector |
-| `eval-planner` | Evaluate planner quality |
 
-## Measured planner quality
+Run `graphsmith --help` for the full list.
 
-Graphsmith includes a planner evaluation harness with two goal sets:
-
-| Set | Goals | Latest Anthropic result |
-|-----|-------|------------------------|
-| Benchmark v1 | 9 | 9/9 = 100% |
-| Holdout | 15 | 15/15 = 100% |
+## LLM providers
 
 ```bash
-graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
-  --backend llm --provider anthropic --model claude-haiku-4-5-20251001
+# Anthropic (recommended)
+export GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
+
+# Groq / OpenAI-compatible
+export GRAPHSMITH_GROQ_API_KEY=gsk_...
+graphsmith eval-planner --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
 ```
 
-See [evaluation/README.md](evaluation/README.md) for benchmark strategy and goal format.
-
-## Current limitations
-
-Graphsmith is a working prototype, not a production system.
-
-**Planning works well on the current task family.** Real LLM planning
-(via `--backend llm`) produces valid multi-skill graphs for single-skill,
-two-skill, and three-skill compositions across paraphrased goal wordings.
-Planning quality on broader or more ambiguous task families has not been
-measured yet. Plans can be saved and inspected with `--save-on-failure`.
-
-**Runtime and validation are stable.** The deterministic executor, value
-binding semantics, topological sort, and validation checks are well-tested
-(530+ tests) and behave predictably.
-
-**Not yet implemented:**
-- Public skill registry (everything is local)
-- Hosted web UI or visual editor (only a local read-only inspector exists)
-- Semantic search (embeddings)
-- Distributed execution
-- Autonomous skill promotion (candidates are advisory only)
-- True parallel execution (`parallel.map` runs sequentially)
-- Multi-turn planning or planner self-repair
-
-## Architecture
-
-See [architecture diagram](docs/ARCHITECTURE_DIAGRAM.md) for Mermaid diagrams.
-
-Five layers:
-1. **Spec** — package format, Pydantic models, JSON Schema
-2. **Runtime** — topological executor, value store, binding semantics
-3. **Registry** — local publish/fetch/search with JSON index
-4. **Planner** — LLM prompt builder, output parser, glue graph composer
-5. **Traces** — persistence, summary, pruning, promotion mining
-
-## Project layout
-
+Or create a `.env` file (gitignored):
 ```
-graphsmith/         Python package
-  models/           Pydantic models (spec layer)
-  parser/           YAML package loader
-  validator/        Deterministic validation
-  runtime/          Topological executor + value store
-  ops/              Primitive op implementations + LLM providers
-  registry/         Local file registry + index
-  planner/          LLM planner + prompt builder + output parser
-  traces/           Trace persistence + promotion mining
-  cli/              Typer CLI
-tests/              pytest test suite (530+ tests)
-examples/skills/    Example skill packages
-docs/               Architecture and design docs
+GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
+GRAPHSMITH_GROQ_API_KEY=gsk_...
 ```
 
 ## Testing
 
 ```bash
-pytest                    # all unit tests (no network)
-pytest -v                 # verbose
-
-# Live provider tests (requires API keys)
-GRAPHSMITH_ANTHROPIC_API_KEY=sk-... pytest tests/test_live_providers.py -v
+pytest              # 922 tests, no network required
+pytest -v           # verbose
+pytest -x           # stop on first failure
 ```
 
-## Links
+## Status and roadmap
 
-- [Why Graphsmith](docs/WHY_GRAPHSMITH.md) — motivation and research direction
-- [Architecture diagram](docs/ARCHITECTURE_DIAGRAM.md)
-- [Example workflows](docs/EXAMPLE_WORKFLOWS.md)
-- [Evaluation benchmark](evaluation/README.md) — planner quality measurement
-- [Binding semantics](docs/BINDING_SEMANTICS.md)
-- [Registry semantics](docs/REGISTRY_SEMANTICS.md)
-- [Planner semantics](docs/PLANNER_SEMANTICS.md)
-- [Changelog](CHANGELOG.md)
-- [Contributing](CONTRIBUTING.md)
+**v1 (current)**: architecture stable, 36/36 on Claude Haiku.
+
+| Component | Status |
+|-----------|--------|
+| IR compiler | Stable |
+| Deterministic scorer | Stable |
+| Decomposition | Stable |
+| Candidate reranking | Stable |
+| Stability measurement | Complete |
+| Candidate dataset pipeline | Complete |
+| Learned reranker | Prototype (no headroom on Claude) |
+
+**Next steps**:
+- Weak-model optimization (Llama 3.1 8B)
+- Learned reranker (when Llama data shows headroom)
+- Broader skill/goal coverage
+
+## Documentation
+
+- [Architecture (v1)](docs/GRAPHSMITH_ARCHITECTURE_V1.md) — full system design
+- [Running evaluations](docs/RUNNING_EVALS.md) — how to reproduce results
+- [IR architecture](docs/PLANNING_IR_ARCHITECTURE.md) — IR design rationale
+- [Evaluation comparison](docs/IR_EVAL_COMPARISON.md) — sprint-by-sprint results
+- [Why Graphsmith](docs/WHY_GRAPHSMITH.md) — motivation
 
 ## License
 
