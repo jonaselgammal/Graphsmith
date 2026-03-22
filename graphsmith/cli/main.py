@@ -83,6 +83,42 @@ def create_skill(
     typer.echo(f"    4. graphsmith validate {path}")
 
 
+# ── export-graph ──────────────────────────────────────────────────────
+
+
+@app.command("export-graph")
+def export_graph(
+    plan_file: str = typer.Argument(..., help="Path to a saved plan JSON file."),
+    format: str = typer.Option("dot", "--format", "-f", help="Output format: dot, json, or ascii."),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path."),
+) -> None:
+    """Export a compiled graph to DOT, JSON, or ASCII format."""
+    from graphsmith.graph_export import graph_to_ascii, graph_to_dot, graph_to_json
+    from graphsmith.planner.composer import load_plan
+
+    try:
+        glue = load_plan(plan_file)
+    except Exception as exc:
+        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if format == "dot":
+        result = graph_to_dot(glue)
+    elif format == "json":
+        result = json.dumps(graph_to_json(glue), indent=2)
+    elif format == "ascii":
+        result = graph_to_ascii(glue)
+    else:
+        typer.secho(f"Unknown format: {format}. Use dot, json, or ascii.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    if output:
+        Path(output).write_text(result + "\n", encoding="utf-8")
+        typer.secho(f"Written to {output}", fg=typer.colors.GREEN)
+    else:
+        typer.echo(result)
+
+
 # ── create-skill-from-goal ────────────────────────────────────────────
 
 

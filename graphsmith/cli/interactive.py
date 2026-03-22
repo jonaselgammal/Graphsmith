@@ -1,22 +1,29 @@
-"""Interactive planning session — inspect candidates, compare, iterate."""
+"""Interactive planning session — inspect candidates, compare, trace, debug."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import typer
 
 from graphsmith.planner.ir_backend import CandidateResult, IRPlannerBackend
-from graphsmith.planner.models import PlanResult
+from graphsmith.planner.models import GlueGraph, PlanResult
+from graphsmith.traces.models import RunTrace
 
 
 # ── Formatting helpers ─────────────────────────────────────────────
 
 
-def format_plan_summary(glue: Any) -> str:
+def format_plan_summary(glue: GlueGraph) -> str:
     """Format a GlueGraph as a clean plan summary."""
     lines: list[str] = []
     lines.append("  Plan Summary")
     lines.append("  " + "-" * 40)
+
+    # Flow chain
+    chain = " \u2192 ".join(n.id for n in glue.graph.nodes)
+    lines.append(f"  Flow: {chain}")
+
     lines.append("  Steps:")
     for i, node in enumerate(glue.graph.nodes, 1):
         skill = node.config.get("skill_id", node.op)
@@ -30,20 +37,14 @@ def format_plan_summary(glue: Any) -> str:
 
 
 def format_candidates(candidates: list[CandidateResult]) -> str:
-    """Format all candidates for inspection."""
     if not candidates:
         return "  No candidates available."
     lines: list[str] = []
-    for c in candidates:
-        selected = ""
-        if c.glue is not None and c.score is not None:
-            # Find if this was the winner (highest score among compiled)
-            compiled = [x for x in candidates if x.status == "compiled" and x.score]
-            if compiled:
-                best = max(compiled, key=lambda x: x.score.total if x.score else 0)
-                if c.index == best.index:
-                    selected = " \u2714 SELECTED"
+    compiled = [x for x in candidates if x.status == "compiled" and x.score]
+    best_idx = max(compiled, key=lambda x: x.score.total if x.score else 0).index if compiled else -1
 
+    for c in candidates:
+        selected = " \u2714 SELECTED" if c.index == best_idx else ""
         lines.append(f"  Candidate {c.index + 1}:{selected}")
         if c.status != "compiled":
             lines.append(f"    status: {c.status}")
@@ -51,64 +52,87 @@ def format_candidates(candidates: list[CandidateResult]) -> str:
                 lines.append(f"    error: {c.error[:80]}")
         else:
             if c.ir:
-                steps = " \u2192 ".join(s.name for s in c.ir.steps)
-                lines.append(f"    steps: {steps}")
-                outs = ", ".join(c.ir.final_outputs.keys())
-                lines.append(f"    outputs: {outs}")
+                lines.append(f"    steps: {' \u2192 '.join(s.name for s in c.ir.steps)}")
+                lines.append(f"    outputs: {', '.join(c.ir.final_outputs.keys())}")
             if c.score:
                 lines.append(f"    score: {c.score.total:.0f}")
                 if c.score.penalties:
-                    pens = [f"{r}" for r, _ in c.score.penalties[:3]]
-                    lines.append(f"    penalties: {'; '.join(pens)}")
+                    lines.append(f"    penalties: {'; '.join(r for r, _ in c.score.penalties[:3])}")
                 if c.score.rewards:
-                    rews = [f"{r}" for r, _ in c.score.rewards[:3]]
-                    lines.append(f"    rewards: {'; '.join(rews)}")
+                    lines.append(f"    rewards: {'; '.join(r for r, _ in c.score.rewards[:3])}")
         lines.append("")
     return "\n".join(lines)
 
 
 def format_compare(candidates: list[CandidateResult]) -> str:
-    """Compare selected candidate vs best alternative."""
     compiled = [c for c in candidates if c.status == "compiled" and c.score]
     if len(compiled) < 2:
         return "  Not enough candidates to compare."
-
     ranked = sorted(compiled, key=lambda c: c.score.total if c.score else 0, reverse=True)
-    best = ranked[0]
-    alternative = ranked[1]
-
+    best, alt = ranked[0], ranked[1]
     lines: list[str] = []
-    lines.append("  Selected (Candidate {})".format(best.index + 1))
-    if best.ir:
-        lines.append("    steps: " + " \u2192 ".join(s.name for s in best.ir.steps))
-        lines.append("    outputs: " + ", ".join(best.ir.final_outputs.keys()))
-    lines.append(f"    score: {best.score.total:.0f}" if best.score else "")
-    lines.append("")
-    lines.append("  Alternative (Candidate {})".format(alternative.index + 1))
-    if alternative.ir:
-        lines.append("    steps: " + " \u2192 ".join(s.name for s in alternative.ir.steps))
-        lines.append("    outputs: " + ", ".join(alternative.ir.final_outputs.keys()))
-    lines.append(f"    score: {alternative.score.total:.0f}" if alternative.score else "")
-
-    # Differences
-    if best.ir and alternative.ir:
-        best_skills = {s.skill_id for s in best.ir.steps}
-        alt_skills = {s.skill_id for s in alternative.ir.steps}
-        only_best = best_skills - alt_skills
-        only_alt = alt_skills - best_skills
+    for label, c in [("Selected", best), ("Alternative", alt)]:
+        lines.append(f"  {label} (Candidate {c.index + 1})")
+        if c.ir:
+            lines.append(f"    steps: {' \u2192 '.join(s.name for s in c.ir.steps)}")
+            lines.append(f"    outputs: {', '.join(c.ir.final_outputs.keys())}")
+        lines.append(f"    score: {c.score.total:.0f}" if c.score else "")
         lines.append("")
+    if best.ir and alt.ir:
+        best_s = {s.skill_id for s in best.ir.steps}
+        alt_s = {s.skill_id for s in alt.ir.steps}
         lines.append("  Differences:")
-        if only_best:
-            lines.append(f"    selected has: {', '.join(sorted(only_best))}")
-        if only_alt:
-            lines.append(f"    alternative has: {', '.join(sorted(only_alt))}")
-        if not only_best and not only_alt:
+        if best_s - alt_s:
+            lines.append(f"    selected has: {', '.join(sorted(best_s - alt_s))}")
+        if alt_s - best_s:
+            lines.append(f"    alternative has: {', '.join(sorted(alt_s - best_s))}")
+        if not (best_s - alt_s) and not (alt_s - best_s):
             lines.append("    same skills, different scores")
-        if best.score and alternative.score:
-            delta = best.score.total - alternative.score.total
-            lines.append(f"    score delta: +{delta:.0f}")
-
+        if best.score and alt.score:
+            lines.append(f"    score delta: +{best.score.total - alt.score.total:.0f}")
     return "\n".join(lines)
+
+
+def format_trace(trace: RunTrace) -> str:
+    """Format an execution trace for display."""
+    lines: list[str] = []
+    lines.append("  Execution Trace")
+    lines.append("  " + "-" * 40)
+    for i, nt in enumerate(trace.nodes, 1):
+        status_icon = "\u2714" if nt.status == "ok" else "\u2716"
+        skill = nt.op
+        lines.append(f"  Step {i}: {nt.node_id} ({skill}) {status_icon}")
+        if nt.inputs_summary:
+            for k, v in nt.inputs_summary.items():
+                val = _truncate(str(v), 60)
+                lines.append(f"    in.{k}: {val}")
+        if nt.outputs_summary:
+            for k, v in nt.outputs_summary.items():
+                val = _truncate(str(v), 60)
+                lines.append(f"    out.{k}: {val}")
+        if nt.error:
+            lines.append(f"    ERROR: {nt.error[:80]}")
+    lines.append("")
+    lines.append(f"  Status: {trace.status}")
+    if trace.started_at and trace.ended_at:
+        lines.append(f"  Time: {trace.started_at} \u2192 {trace.ended_at}")
+    return "\n".join(lines)
+
+
+def format_nodes(glue: GlueGraph) -> str:
+    """List all nodes in the graph."""
+    lines = ["  Nodes:"]
+    for node in glue.graph.nodes:
+        skill = node.config.get("skill_id", node.op)
+        lines.append(f"    {node.id}: {skill}")
+    lines.append("  Outputs:")
+    for name, addr in glue.graph.outputs.items():
+        lines.append(f"    {name}: {addr}")
+    return "\n".join(lines)
+
+
+def _truncate(s: str, max_len: int) -> str:
+    return s if len(s) <= max_len else s[:max_len - 3] + "..."
 
 
 HELP_TEXT = """
@@ -121,6 +145,11 @@ HELP_TEXT = """
     :decomposition     Show last decomposition
     :rerun             Rerun last goal
     :rerun N           Rerun with N candidates
+    :nodes             List graph nodes
+    :graph             Export graph as ASCII/DOT
+    :graph dot         Export as DOT format
+    :trace             Show last execution trace
+    :inspect <node>    Show node inputs/outputs from trace
     (anything else)    Plan a new goal
 """
 
@@ -146,9 +175,9 @@ class InteractiveSession:
         self.history: list[str] = []
         self.last_result: PlanResult | None = None
         self.last_goal: str = ""
+        self.last_trace: RunTrace | None = None
 
     def run(self) -> None:
-        """Main interactive loop."""
         cand_count = self.backend._candidate_count
         decomp = "on" if self.backend._use_decomposition else "off"
         typer.echo("")
@@ -164,10 +193,8 @@ class InteractiveSession:
             except (KeyboardInterrupt, EOFError):
                 typer.echo("")
                 break
-
             if not raw:
                 continue
-
             if raw.startswith(":"):
                 if not self._handle_command(raw):
                     break
@@ -175,7 +202,6 @@ class InteractiveSession:
                 self._plan_goal(raw)
 
     def _handle_command(self, cmd: str) -> bool:
-        """Handle a : command. Returns False to exit."""
         parts = cmd.split(None, 1)
         name = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
@@ -194,14 +220,22 @@ class InteractiveSession:
             self._show_decomposition()
         elif name == ":rerun":
             self._rerun(arg)
+        elif name == ":nodes":
+            self._show_nodes()
+        elif name == ":graph":
+            self._show_graph(arg)
+        elif name == ":trace":
+            self._show_trace()
+        elif name == ":inspect":
+            self._inspect_node(arg)
         else:
             typer.echo(f"  Unknown command: {name}. Type :help")
         return True
 
     def _plan_goal(self, goal: str) -> None:
-        """Plan a goal and display results."""
         self.last_goal = goal
         self.history.append(goal)
+        self.last_trace = None
 
         typer.echo("  Planning...")
         typer.echo("")
@@ -230,10 +264,9 @@ class InteractiveSession:
 
         typer.echo(format_plan_summary(result.graph))
 
-        # Show brief candidate count
         compiled = [c for c in self.backend.last_candidates if c.status == "compiled"]
         typer.echo(f"\n  ({len(compiled)} candidates compiled, "
-                   f":candidates to inspect, :compare to diff)")
+                   f":candidates to inspect, :trace to execute)")
         typer.echo("")
 
     def _show_history(self) -> None:
@@ -246,18 +279,10 @@ class InteractiveSession:
         typer.echo("")
 
     def _show_candidates(self) -> None:
-        cands = self.backend.last_candidates
-        if not cands:
-            typer.echo("  No candidates. Run a goal first.")
-        else:
-            typer.echo(format_candidates(cands))
+        typer.echo(format_candidates(self.backend.last_candidates or []))
 
     def _show_compare(self) -> None:
-        cands = self.backend.last_candidates
-        if not cands:
-            typer.echo("  No candidates. Run a goal first.")
-        else:
-            typer.echo(format_compare(cands))
+        typer.echo(format_compare(self.backend.last_candidates or []))
         typer.echo("")
 
     def _show_decomposition(self) -> None:
@@ -273,11 +298,66 @@ class InteractiveSession:
                 typer.echo(f"    reasoning: {d.reasoning[:120]}")
         typer.echo("")
 
+    def _show_nodes(self) -> None:
+        if not self.last_result or not self.last_result.graph:
+            typer.echo("  No plan. Run a goal first.")
+            return
+        typer.echo(format_nodes(self.last_result.graph))
+        typer.echo("")
+
+    def _show_graph(self, fmt: str) -> None:
+        if not self.last_result or not self.last_result.graph:
+            typer.echo("  No plan. Run a goal first.")
+            return
+        from graphsmith.graph_export import graph_to_ascii, graph_to_dot
+        if fmt.strip().lower() == "dot":
+            typer.echo(graph_to_dot(self.last_result.graph))
+        else:
+            typer.echo(graph_to_ascii(self.last_result.graph))
+        typer.echo("")
+
+    def _show_trace(self) -> None:
+        if self.last_trace:
+            typer.echo(format_trace(self.last_trace))
+            return
+        # Execute the plan to produce a trace
+        if not self.last_result or not self.last_result.graph:
+            typer.echo("  No plan. Run a goal first.")
+            return
+        typer.echo("  (No execution trace yet — plan only. Execute with input to see traces.)")
+        typer.echo("")
+
+    def _inspect_node(self, node_id: str) -> None:
+        node_id = node_id.strip()
+        if not node_id:
+            typer.echo("  Usage: :inspect <node_id>")
+            return
+        if not self.last_trace:
+            typer.echo("  No trace. Execute a plan first to inspect nodes.")
+            return
+        for nt in self.last_trace.nodes:
+            if nt.node_id == node_id:
+                typer.echo(f"  Node: {nt.node_id} ({nt.op})")
+                typer.echo(f"  Status: {nt.status}")
+                if nt.inputs_summary:
+                    typer.echo("  Inputs:")
+                    for k, v in nt.inputs_summary.items():
+                        typer.echo(f"    {k}: {_truncate(str(v), 80)}")
+                if nt.outputs_summary:
+                    typer.echo("  Outputs:")
+                    for k, v in nt.outputs_summary.items():
+                        typer.echo(f"    {k}: {_truncate(str(v), 80)}")
+                if nt.error:
+                    typer.echo(f"  Error: {nt.error}")
+                typer.echo("")
+                return
+        typer.echo(f"  Node '{node_id}' not found in trace.")
+        typer.echo("")
+
     def _rerun(self, arg: str) -> None:
         if not self.last_goal:
             typer.echo("  No previous goal to rerun.")
             return
-
         if arg.strip().isdigit():
             n = int(arg.strip())
             old = self.backend._candidate_count

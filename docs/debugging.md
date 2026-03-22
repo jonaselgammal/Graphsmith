@@ -50,8 +50,33 @@ In `graphsmith run-interactive`, after a plan:
 | `:candidates` | All N candidates with steps, scores, penalties |
 | `:compare` | Selected vs best alternative with skill differences |
 | `:decomposition` | Semantic decomposition (content transforms, presentation) |
+| `:nodes` | List all nodes in the graph with skills |
+| `:graph` | ASCII flow diagram |
+| `:graph dot` | Graphviz DOT export |
+| `:trace` | Show execution trace with inputs/outputs per step |
+| `:inspect <node>` | Show a specific node's inputs and outputs |
 | `:rerun` | Rerun same goal (different LLM samples) |
 | `:rerun 5` | Rerun with 5 candidates |
+
+### Graph export
+
+Export any plan to DOT or JSON:
+
+```bash
+graphsmith export-graph plan.json --format dot -o plan.dot
+graphsmith export-graph plan.json --format json
+graphsmith export-graph plan.json --format ascii
+```
+
+### Debugging workflow
+
+1. `graphsmith run-interactive` — plan a goal
+2. `:candidates` — inspect all candidates
+3. `:compare` — see why one was chosen
+4. `:nodes` — list the graph structure
+5. `:graph dot` — export for visualization
+6. `:trace` — see execution step by step
+7. `:inspect normalize` — check a specific node's I/O
 
 ## Common failure classes
 
