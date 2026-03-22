@@ -1,0 +1,6 @@
+examples:
+  - name: extract_emails
+    input:
+      text: "Contact alice@example.com or bob@test.org"
+    expected_output:
+      matches: "alice@example.com\nbob@test.org"

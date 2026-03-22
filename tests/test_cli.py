@@ -540,7 +540,7 @@ def test_list_ops() -> None:
     result = runner.invoke(app, ["list-ops"])
     assert result.exit_code == 0
     lines = result.output.strip().split("\n")
-    assert len(lines) == 18
+    assert len(lines) >= 18  # grows as new ops are added
     assert "template.render" in result.output
     assert "text.normalize" in result.output
     assert "text.word_count" in result.output

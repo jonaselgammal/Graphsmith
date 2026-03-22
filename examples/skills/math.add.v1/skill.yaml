@@ -1,0 +1,23 @@
+id: math.add.v1
+name: Add Numbers
+version: 1.0.0
+description: Add two numbers.
+
+inputs:
+  - name: a
+    type: string
+    required: true
+  - name: b
+    type: string
+    required: true
+
+outputs:
+  - name: result
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - math
+  - arithmetic

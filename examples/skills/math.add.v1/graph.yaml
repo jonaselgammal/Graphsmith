@@ -1,0 +1,14 @@
+version: 1
+
+nodes:
+  - id: add
+    op: math.add
+
+edges:
+  - from: input.a
+    to: add.a
+  - from: input.b
+    to: add.b
+
+outputs:
+  result: add.result

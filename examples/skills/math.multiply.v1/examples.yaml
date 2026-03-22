@@ -1,0 +1,7 @@
+examples:
+  - name: multiply_integers
+    input:
+      a: "3"
+      b: "5"
+    expected_output:
+      result: "15"

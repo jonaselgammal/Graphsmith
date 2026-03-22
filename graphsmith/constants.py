@@ -19,6 +19,12 @@ PRIMITIVE_OPS = {
     "text.sort_lines",
     "text.remove_duplicates",
     "text.title_case",
+    "text.split",
+    "text.filter_lines",
+    "text.regex_extract",
+    "math.add",
+    "math.multiply",
+    "math.mean",
 }
 
 ALLOWED_TYPES: set[str] = {

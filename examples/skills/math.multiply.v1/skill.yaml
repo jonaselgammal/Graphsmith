@@ -1,0 +1,23 @@
+id: math.multiply.v1
+name: Multiply Numbers
+version: 1.0.0
+description: Multiply two numbers.
+
+inputs:
+  - name: a
+    type: string
+    required: true
+  - name: b
+    type: string
+    required: true
+
+outputs:
+  - name: result
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - math
+  - arithmetic

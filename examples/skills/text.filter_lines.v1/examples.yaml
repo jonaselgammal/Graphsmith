@@ -1,0 +1,6 @@
+examples:
+  - name: filter_errors
+    input:
+      text: "INFO: ok\nERROR: fail\nINFO: done"
+    expected_output:
+      filtered: "INFO: ok\nINFO: done"

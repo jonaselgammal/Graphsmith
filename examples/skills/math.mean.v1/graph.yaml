@@ -1,0 +1,12 @@
+version: 1
+
+nodes:
+  - id: mean
+    op: math.mean
+
+edges:
+  - from: input.values
+    to: mean.values
+
+outputs:
+  result: mean.result

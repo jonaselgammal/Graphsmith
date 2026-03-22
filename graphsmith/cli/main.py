@@ -57,6 +57,32 @@ def list_ops() -> None:
         typer.echo(op)
 
 
+# ── create-skill ──────────────────────────────────────────────────────
+
+
+@app.command("create-skill")
+def create_skill(
+    name: str = typer.Argument(..., help="Skill ID (e.g. text.uppercase.v1)"),
+    output_dir: str = typer.Option("examples/skills", "--output-dir", "-o",
+                                    help="Parent directory for the new skill."),
+) -> None:
+    """Generate a new skill scaffold with boilerplate files."""
+    from graphsmith.skills.template import create_skill_template
+
+    path = create_skill_template(name, output_dir)
+    typer.secho(f"Created skill scaffold: {path}", fg=typer.colors.GREEN)
+    typer.echo("  Files:")
+    typer.echo(f"    {path}/skill.yaml   — metadata + I/O spec")
+    typer.echo(f"    {path}/graph.yaml   — execution graph")
+    typer.echo(f"    {path}/examples.yaml — test examples")
+    typer.echo("")
+    typer.echo("  Next steps:")
+    typer.echo(f"    1. Edit the files above")
+    typer.echo(f"    2. Implement the op in graphsmith/ops/")
+    typer.echo(f"    3. Register it in graphsmith/ops/registry.py")
+    typer.echo(f"    4. graphsmith validate {path}")
+
+
 # ── doctor ───────────────────────────────────────────────────────────
 
 

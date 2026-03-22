@@ -191,7 +191,7 @@ graphsmith/
   evaluation/       Eval harness, stability analysis, candidate dataset
   cli/              Typer CLI (20+ commands)
   traces/           Execution trace persistence + promotion mining
-examples/skills/    15 skill packages
+examples/skills/    21 skill packages (text, math, JSON)
 evaluation/         36 eval goals (benchmark + holdout + challenge)
 scripts/            Eval runners, analysis tools, data collection
 tests/              922 tests
@@ -210,10 +210,24 @@ docs/               Architecture and sprint documentation
 | `publish` | Publish a skill to the local registry |
 | `search` | Search published skills |
 | `validate` | Validate a skill package |
+| `create-skill` | Generate a new skill scaffold |
+| `doctor` | Check system readiness |
 | `ui` | Launch local plan inspector (browser) |
 | `version` | Print version |
 
 Run `graphsmith --help` for the full list.
+
+## Skills
+
+Graphsmith includes 21 built-in skills across text, math, and JSON categories.
+
+Create new skills with:
+```bash
+graphsmith create-skill my_domain.my_op.v1
+```
+
+This generates a complete scaffold (skill.yaml, graph.yaml, examples.yaml).
+See [docs/SKILLS.md](docs/SKILLS.md) for the full guide.
 
 ## LLM providers
 

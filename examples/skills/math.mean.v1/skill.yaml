@@ -1,0 +1,20 @@
+id: math.mean.v1
+name: Mean of Numbers
+version: 1.0.0
+description: Compute the arithmetic mean of newline-separated numbers.
+
+inputs:
+  - name: values
+    type: string
+    required: true
+
+outputs:
+  - name: result
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - math
+  - statistics

@@ -1,0 +1,14 @@
+version: 1
+
+nodes:
+  - id: mul
+    op: math.multiply
+
+edges:
+  - from: input.a
+    to: mul.a
+  - from: input.b
+    to: mul.b
+
+outputs:
+  result: mul.result

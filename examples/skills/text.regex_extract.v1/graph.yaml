@@ -1,0 +1,14 @@
+version: 1
+
+nodes:
+  - id: extract
+    op: text.regex_extract
+    config:
+      pattern: ""
+
+edges:
+  - from: input.text
+    to: extract.text
+
+outputs:
+  matches: extract.matches

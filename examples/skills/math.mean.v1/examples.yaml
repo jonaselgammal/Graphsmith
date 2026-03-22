@@ -1,0 +1,6 @@
+examples:
+  - name: mean_of_three
+    input:
+      values: "10\n20\n30"
+    expected_output:
+      result: "20"

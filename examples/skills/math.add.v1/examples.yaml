@@ -1,0 +1,7 @@
+examples:
+  - name: add_integers
+    input:
+      a: "3"
+      b: "4"
+    expected_output:
+      result: "7"

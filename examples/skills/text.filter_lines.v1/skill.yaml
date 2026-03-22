@@ -1,0 +1,20 @@
+id: text.filter_lines.v1
+name: Filter Lines
+version: 1.0.0
+description: Filter lines of text that contain a substring.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: filtered
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - filter

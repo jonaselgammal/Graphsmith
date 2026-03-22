@@ -1,4 +1,4 @@
-"""Pure text ops: normalize, word_count, reverse, sort_lines, remove_duplicates, title_case."""
+"""Pure text ops: normalize, word_count, reverse, sort_lines, remove_duplicates, title_case, split, filter_lines, regex_extract."""
 from __future__ import annotations
 
 import re
@@ -94,3 +94,54 @@ def text_title_case(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str,
     if text is None:
         raise OpError("text.title_case requires input 'text'")
     return {"titled": str(text).title()}
+
+
+def text_split(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    """Split text by a delimiter.
+
+    Inputs: text (str)
+    Config: delimiter (str, default: newline)
+    Returns: {"parts": <str> (newline-separated parts)}
+    """
+    text = inputs.get("text")
+    if text is None:
+        raise OpError("text.split requires input 'text'")
+    delimiter = config.get("delimiter", "\n")
+    parts = str(text).split(delimiter)
+    return {"parts": "\n".join(p.strip() for p in parts if p.strip())}
+
+
+def text_filter_lines(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    """Filter lines containing a substring.
+
+    Inputs: text (str)
+    Config: contains (str) — substring to match
+    Returns: {"filtered": <str> (matching lines)}
+    """
+    text = inputs.get("text")
+    if text is None:
+        raise OpError("text.filter_lines requires input 'text'")
+    pattern = config.get("contains", "")
+    lines = str(text).split("\n")
+    matched = [line for line in lines if pattern in line]
+    return {"filtered": "\n".join(matched)}
+
+
+def text_regex_extract(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    """Extract matches of a regex pattern from text.
+
+    Inputs: text (str)
+    Config: pattern (str) — regex pattern
+    Returns: {"matches": <str> (newline-separated matches)}
+    """
+    text = inputs.get("text")
+    if text is None:
+        raise OpError("text.regex_extract requires input 'text'")
+    pattern = config.get("pattern", "")
+    if not pattern:
+        raise OpError("text.regex_extract requires config 'pattern'")
+    try:
+        found = re.findall(pattern, str(text))
+    except re.error as exc:
+        raise OpError(f"text.regex_extract: invalid regex: {exc}") from exc
+    return {"matches": "\n".join(str(m) for m in found)}

@@ -14,6 +14,7 @@ from graphsmith.ops.llm_provider import LLMProvider, StubLLMProvider
 from graphsmith.ops.parallel_map import parallel_map
 from graphsmith.ops.select import select_fields
 from graphsmith.ops.template import template_render
+from graphsmith.ops.math_ops import math_add, math_mean, math_multiply
 from graphsmith.ops.text_ops import (
     text_normalize,
     text_word_count,
@@ -21,6 +22,9 @@ from graphsmith.ops.text_ops import (
     text_sort_lines,
     text_remove_duplicates,
     text_title_case,
+    text_split,
+    text_filter_lines,
+    text_regex_extract,
 )
 
 # Ops that need no external provider
@@ -39,6 +43,12 @@ _PURE_OPS: dict[str, Any] = {
     "text.sort_lines": text_sort_lines,
     "text.remove_duplicates": text_remove_duplicates,
     "text.title_case": text_title_case,
+    "text.split": text_split,
+    "text.filter_lines": text_filter_lines,
+    "text.regex_extract": text_regex_extract,
+    "math.add": math_add,
+    "math.multiply": math_multiply,
+    "math.mean": math_mean,
 }
 
 

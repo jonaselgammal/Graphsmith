@@ -1,0 +1,20 @@
+id: text.split.v1
+name: Split Text
+version: 1.0.0
+description: Split text by a delimiter into parts.
+
+inputs:
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: parts
+    type: string
+
+effects:
+  - pure
+
+tags:
+  - text
+  - split

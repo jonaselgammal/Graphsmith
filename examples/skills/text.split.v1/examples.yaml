@@ -1,0 +1,6 @@
+examples:
+  - name: split_lines
+    input:
+      text: "hello\nworld\nfoo"
+    expected_output:
+      parts: "hello\nworld\nfoo"
