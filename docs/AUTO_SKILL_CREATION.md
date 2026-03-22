@@ -5,13 +5,17 @@ descriptions, including the implementation, validation, and example tests.
 
 ## Supported skill types
 
-This prototype supports **deterministic, single-step** skills:
+Supports **deterministic, single-step** skills across 7 template families:
 
-| Category | Examples |
-|----------|---------|
-| Text | uppercase, lowercase, replace, strip_prefix, strip_suffix, contains, char_count |
-| Math | subtract, divide |
-| JSON | get_key |
+| Family | Templates | Description |
+|--------|-----------|-------------|
+| text_unary | uppercase, lowercase, trim, char_count, line_count, join | Single-input text transforms |
+| text_config_predicate | starts_with, ends_with, contains | Text checks with config |
+| text_config_transform | replace, strip_prefix, strip_suffix | Text transforms with config |
+| math_binary | subtract, divide | Two-number arithmetic |
+| math_list | min, max | Aggregate over number lists |
+| json_accessor | get_key, keys, pretty | JSON data access |
+| json_predicate | has_key | JSON property checks |
 
 ## Usage
 

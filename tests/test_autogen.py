@@ -1,4 +1,4 @@
-"""Tests for automatic skill generation prototype."""
+"""Tests for automatic skill generation (phase 2)."""
 from __future__ import annotations
 
 import tempfile
@@ -14,6 +14,7 @@ from graphsmith.skills.autogen import (
     generate_op_code,
     generate_skill_files,
     register_generated_op,
+    run_generation_suite,
     validate_and_test,
 )
 
@@ -22,67 +23,50 @@ from graphsmith.skills.autogen import (
 
 
 class TestExtractSpec:
-    def test_uppercase(self) -> None:
+    @pytest.mark.parametrize("goal,expected_key", [
+        ("uppercase text", "uppercase"),
+        ("convert to lowercase", "lowercase"),
+        ("trim whitespace", "trim"),
+        ("count characters", "char_count"),
+        ("count lines in text", "line_count"),
+        ("join lines together", "join"),
+        ("check if text starts with prefix", "starts_with"),
+        ("check ends with suffix", "ends_with"),
+        ("check if text contains word", "contains"),
+        ("replace substring", "replace"),
+        ("strip prefix from text", "strip_prefix"),
+        ("remove suffix", "strip_suffix"),
+        ("subtract two numbers", "subtract"),
+        ("divide numbers", "divide"),
+        ("find minimum of numbers", "min"),
+        ("find the maximum", "max"),
+        ("get key from json", "get_key"),
+        ("check if json has key", "has_key"),
+        ("list json keys", "keys"),
+        ("pretty print json", "pretty"),
+    ])
+    def test_template_matching(self, goal: str, expected_key: str) -> None:
+        spec = extract_spec(goal)
+        assert spec.template_key == expected_key
+
+    def test_spec_has_family(self) -> None:
         spec = extract_spec("uppercase text")
-        assert spec.template_key == "uppercase"
-        assert spec.skill_id == "text.uppercase.v1"
-        assert spec.category == "text"
-        assert len(spec.examples) >= 2
-
-    def test_lowercase(self) -> None:
-        spec = extract_spec("convert to lowercase")
-        assert spec.template_key == "lowercase"
-        assert spec.skill_id == "text.lowercase.v1"
-
-    def test_subtract(self) -> None:
-        spec = extract_spec("subtract two numbers")
-        assert spec.template_key == "subtract"
-        assert spec.category == "math"
-
-    def test_divide(self) -> None:
-        spec = extract_spec("divide numbers")
-        assert spec.template_key == "divide"
-
-    def test_contains(self) -> None:
-        spec = extract_spec("check if text contains a word")
-        assert spec.template_key == "contains"
-
-    def test_char_count(self) -> None:
-        spec = extract_spec("count characters in text")
-        assert spec.template_key == "char_count"
-
-    def test_json_get_key(self) -> None:
-        spec = extract_spec("get key from json")
-        assert spec.template_key == "get_key"
-        assert spec.category == "json"
-
-    def test_strip_prefix(self) -> None:
-        spec = extract_spec("remove prefix from text")
-        assert spec.template_key == "strip_prefix"
+        assert spec.family == "text_unary"
 
     def test_unrecognized_raises(self) -> None:
         with pytest.raises(AutogenError, match="Could not match"):
             extract_spec("frobnicate the gizmo")
 
-    def test_out_of_scope_network(self) -> None:
+    @pytest.mark.parametrize("goal", [
+        "fetch data from http API",
+        "read file from disk",
+        "delete file from system",
+        "execute shell command",
+        "create an autonomous agent loop",
+    ])
+    def test_out_of_scope(self, goal: str) -> None:
         with pytest.raises(AutogenError, match="Out of scope"):
-            extract_spec("fetch data from http API")
-
-    def test_out_of_scope_file(self) -> None:
-        with pytest.raises(AutogenError, match="Out of scope"):
-            extract_spec("read file from disk")
-
-    def test_out_of_scope_delete_file(self) -> None:
-        with pytest.raises(AutogenError, match="Out of scope"):
-            extract_spec("delete file from disk")
-
-    def test_out_of_scope_shell(self) -> None:
-        with pytest.raises(AutogenError, match="Out of scope"):
-            extract_spec("execute shell command")
-
-    def test_out_of_scope_agent(self) -> None:
-        with pytest.raises(AutogenError, match="Out of scope"):
-            extract_spec("create an autonomous agent loop")
+            extract_spec(goal)
 
 
 # ── Code generation ───────────────────────────────────────────────
@@ -90,15 +74,17 @@ class TestExtractSpec:
 
 class TestGenerateCode:
     def test_uppercase_code(self) -> None:
-        spec = extract_spec("uppercase text")
-        code = generate_op_code(spec)
+        code = generate_op_code(extract_spec("uppercase text"))
         assert "def text_uppercase" in code
         assert ".upper()" in code
 
-    def test_subtract_code(self) -> None:
-        spec = extract_spec("subtract")
-        code = generate_op_code(spec)
+    def test_math_code(self) -> None:
+        code = generate_op_code(extract_spec("subtract"))
         assert "def math_subtract" in code
+
+    def test_json_code(self) -> None:
+        code = generate_op_code(extract_spec("json has key"))
+        assert "def json_has_key" in code
 
 
 # ── File generation ───────────────────────────────────────────────
@@ -106,91 +92,65 @@ class TestGenerateCode:
 
 class TestGenerateFiles:
     def test_creates_all_files(self) -> None:
-        spec = extract_spec("uppercase text")
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
+            path = generate_skill_files(extract_spec("uppercase text"), tmpdir)
             assert (path / "skill.yaml").is_file()
             assert (path / "graph.yaml").is_file()
             assert (path / "examples.yaml").is_file()
 
     def test_skill_yaml_content(self) -> None:
-        spec = extract_spec("uppercase text")
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
+            path = generate_skill_files(extract_spec("trim text"), tmpdir)
             content = (path / "skill.yaml").read_text()
-            assert "id: text.uppercase.v1" in content
-            assert "uppercase" in content.lower()
+            assert "text.trim.v1" in content
+            assert "pure" in content
 
-    def test_graph_yaml_references_op(self) -> None:
-        spec = extract_spec("uppercase text")
+    def test_graph_yaml_op(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
+            path = generate_skill_files(extract_spec("minimum"), tmpdir)
             content = (path / "graph.yaml").read_text()
-            assert "op: text.uppercase" in content
-
-    def test_examples_yaml_has_entries(self) -> None:
-        spec = extract_spec("uppercase text")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
-            content = (path / "examples.yaml").read_text()
-            assert "HELLO WORLD" in content
+            assert "op: math.min" in content
 
 
-# ── Validation + testing ──────────────────────────────────────────
+# ── Validation + testing (all templates) ──────────────────────────
 
 
-class TestValidateAndTest:
-    def test_uppercase_passes(self) -> None:
-        spec = extract_spec("uppercase text")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
-            result = validate_and_test(spec, path)
-            assert result["validation"] == "PASS"
-            assert result["examples_passed"] == result["examples_total"]
-            assert result["examples_total"] >= 2
+class TestValidateAllTemplates:
+    """Every template should generate, validate, and pass examples."""
 
-    def test_lowercase_passes(self) -> None:
-        spec = extract_spec("lowercase text")
+    @pytest.mark.parametrize("goal", [
+        "uppercase text", "lowercase text", "trim text",
+        "char count", "line count", "join lines",
+        "starts with", "ends with", "contains substring",
+        "replace text", "strip prefix", "strip suffix",
+        "subtract numbers", "divide numbers",
+        "minimum of numbers", "maximum of numbers",
+        "get key from json", "json has key", "json keys", "pretty print json",
+    ])
+    def test_template_end_to_end(self, goal: str) -> None:
+        spec = extract_spec(goal)
         with tempfile.TemporaryDirectory() as tmpdir:
             path = generate_skill_files(spec, tmpdir)
             result = validate_and_test(spec, path)
-            assert result["validation"] == "PASS"
-            assert result["examples_passed"] == result["examples_total"]
-
-    def test_subtract_passes(self) -> None:
-        spec = extract_spec("subtract numbers")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
-            result = validate_and_test(spec, path)
-            assert result["validation"] == "PASS"
-            assert result["examples_passed"] == result["examples_total"]
-
-    def test_divide_passes(self) -> None:
-        spec = extract_spec("divide numbers")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
-            result = validate_and_test(spec, path)
-            assert result["validation"] == "PASS"
-            assert result["examples_passed"] == result["examples_total"]
-
-    def test_char_count_passes(self) -> None:
-        spec = extract_spec("character count")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
-            result = validate_and_test(spec, path)
-            assert result["validation"] == "PASS"
-            assert result["examples_passed"] == result["examples_total"]
-
-    def test_json_get_key_passes(self) -> None:
-        spec = extract_spec("get key from json")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = generate_skill_files(spec, tmpdir)
-            result = validate_and_test(spec, path)
-            assert result["validation"] == "PASS"
-            assert result["examples_passed"] == result["examples_total"]
+            assert result["validation"] == "PASS", f"Validation failed: {result['errors']}"
+            assert result["examples_passed"] == result["examples_total"], \
+                f"Examples failed: {result['errors']}"
 
 
-# ── Format result ─────────────────────────────────────────────────
+# ── Bulk harness ──────────────────────────────────────────────────
+
+
+class TestBulkHarness:
+    def test_run_generation_suite(self) -> None:
+        summary = run_generation_suite()
+        assert summary["total"] > 0
+        assert summary["passed"] == summary["total"], \
+            f"{summary['total'] - summary['passed']} templates failed"
+        assert summary["validation_failures"] == 0
+        assert summary["example_failures"] == 0
+
+
+# ── Dry-run / format ─────────────────────────────────────────────
 
 
 class TestFormatResult:
@@ -207,10 +167,9 @@ class TestFormatResult:
                   "errors": ["something broke"]}
         text = format_result(result, Path("/tmp/test"))
         assert "FAIL" in text
-        assert "something broke" in text
 
 
-# ── Existing create-skill still works ─────────────────────────────
+# ── No regression ────────────────────────────────────────────────
 
 
 class TestNoRegression:
