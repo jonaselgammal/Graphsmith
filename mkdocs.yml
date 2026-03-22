@@ -1,0 +1,18 @@
+site_name: Graphsmith
+site_description: Semantic planner + compiler for graph-based AI workflows
+repo_url: https://github.com/jonaselgammal/Graphsmith
+
+nav:
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - CLI Reference: cli.md
+  - Skills: SKILLS.md
+  - Architecture: architecture.md
+  - Examples: examples.md
+  - Evaluation: evaluation.md
+  - Debugging: debugging.md
+
+docs_dir: docs
+
+theme:
+  name: readthedocs

@@ -32,6 +32,9 @@ Thumbs.db
 # Secrets (never commit)
 .env
 
+# Docs build
+site/
+
 # Graphsmith local state (never commit these)
 .graphsmith/
 evaluation/results*.json

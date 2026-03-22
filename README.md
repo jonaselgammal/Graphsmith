@@ -250,7 +250,7 @@ GRAPHSMITH_GROQ_API_KEY=gsk_...
 ## Testing
 
 ```bash
-pytest              # 922 tests, no network required
+pytest              # 970 tests, no network required
 pytest -v           # verbose
 pytest -x           # stop on first failure
 ```
@@ -276,13 +276,15 @@ pytest -x           # stop on first failure
 
 ## Documentation
 
-- [Architecture (v1)](docs/GRAPHSMITH_ARCHITECTURE_V1.md) — full system design
-- [Running evaluations](docs/RUNNING_EVALS.md) — how to reproduce results
-- [Debugging and traces](docs/DEBUGGING_AND_TRACES.md) — inspecting failures
-- [IR architecture](docs/PLANNING_IR_ARCHITECTURE.md) — IR design rationale
-- [Evaluation comparison](docs/IR_EVAL_COMPARISON.md) — sprint-by-sprint results
+- **[Full Documentation](docs/index.md)** — getting started, CLI, skills, architecture
+- [Getting Started](docs/getting_started.md) — install and first run
+- [CLI Reference](docs/cli.md) — all commands and flags
+- [Skills Guide](docs/SKILLS.md) — built-in skills and how to create new ones
+- [Architecture](docs/architecture.md) — how the system works
+- [Examples](docs/examples.md) — end-to-end usage patterns
+- [Evaluation](docs/evaluation.md) — running benchmarks
+- [Debugging](docs/debugging.md) — inspecting failures
 - [Changelog](CHANGELOG.md) — version history
-- [Why Graphsmith](docs/WHY_GRAPHSMITH.md) — motivation
 
 ## License
 
