@@ -7,6 +7,7 @@ nav:
   - Getting Started: getting_started.md
   - CLI Reference: cli.md
   - Skills: SKILLS.md
+  - Auto Skill Creation: AUTO_SKILL_CREATION.md
   - Architecture: architecture.md
   - Examples: examples.md
   - Evaluation: evaluation.md

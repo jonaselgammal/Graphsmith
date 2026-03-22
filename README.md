@@ -227,7 +227,15 @@ graphsmith create-skill my_domain.my_op.v1
 ```
 
 This generates a complete scaffold (skill.yaml, graph.yaml, examples.yaml).
-See [docs/SKILLS.md](docs/SKILLS.md) for the full guide.
+
+Or auto-generate a complete skill from a description:
+```bash
+graphsmith create-skill-from-goal "uppercase text"
+# → generates implementation + validates + runs tests
+```
+
+See [docs/SKILLS.md](docs/SKILLS.md) for the full guide and
+[docs/AUTO_SKILL_CREATION.md](docs/AUTO_SKILL_CREATION.md) for auto-generation.
 
 ## LLM providers
 

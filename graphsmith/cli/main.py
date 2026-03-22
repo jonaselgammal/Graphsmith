@@ -83,6 +83,79 @@ def create_skill(
     typer.echo(f"    4. graphsmith validate {path}")
 
 
+# ── create-skill-from-goal ────────────────────────────────────────────
+
+
+@app.command("create-skill-from-goal")
+def create_skill_from_goal(
+    goal: str = typer.Argument(..., help="Natural language description (e.g. 'uppercase text')"),
+    output_dir: str = typer.Option("examples/skills", "--output-dir", "-o",
+                                    help="Parent directory for the new skill."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show spec without generating files."),
+) -> None:
+    """Auto-generate a skill from a natural language description.
+
+    Supports simple deterministic ops: text transforms, math, JSON access.
+    Generated skills include implementation, validation, and example tests.
+    """
+    from graphsmith.skills.autogen import (
+        AutogenError,
+        extract_spec,
+        format_result,
+        generate_op_code,
+        generate_skill_files,
+        validate_and_test,
+    )
+
+    # Extract spec
+    try:
+        spec = extract_spec(goal)
+    except AutogenError as exc:
+        typer.secho(f"  {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("")
+    typer.echo(f"  Skill: {spec.skill_id}")
+    typer.echo(f"  Op: {spec.op_name}")
+    typer.echo(f"  Description: {spec.description}")
+    typer.echo(f"  Template: {spec.template_key}")
+    typer.echo("")
+
+    if dry_run:
+        typer.echo("  [dry-run] Op code:")
+        typer.echo("")
+        for line in generate_op_code(spec).split("\n"):
+            typer.echo(f"    {line}")
+        typer.echo("")
+        return
+
+    # Check for existing skill
+    from pathlib import Path
+    skill_path = Path(output_dir) / spec.skill_id
+    if skill_path.exists():
+        typer.secho(f"  Skill already exists: {skill_path}", fg=typer.colors.YELLOW)
+        typer.echo("  Use --output-dir to generate elsewhere, or remove the existing skill first.")
+        raise typer.Exit(code=1)
+
+    # Generate files
+    skill_dir = generate_skill_files(spec, output_dir)
+
+    # Validate + test
+    result = validate_and_test(spec, skill_dir)
+    typer.echo(format_result(result, skill_dir))
+
+    all_pass = (result["validation"] == "PASS" and
+                result["examples_passed"] == result["examples_total"])
+    if all_pass:
+        typer.echo("")
+        typer.secho("  Ready to use.", fg=typer.colors.GREEN)
+        typer.echo(f"  Publish: graphsmith publish {skill_dir} --registry $REG")
+    else:
+        typer.echo("")
+        typer.secho("  Generated with issues. Review before publishing.", fg=typer.colors.YELLOW)
+    typer.echo("")
+
+
 # ── doctor ───────────────────────────────────────────────────────────
 
 
