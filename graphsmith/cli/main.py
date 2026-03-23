@@ -639,11 +639,27 @@ def traces_list(
         None, "--trace-root",
         help="Custom trace root (default: ~/.graphsmith/traces).",
     ),
+    summary: bool = typer.Option(
+        False, "--summary",
+        help="Print one compact summary line per trace.",
+    ),
 ) -> None:
     """List stored execution traces."""
     from graphsmith.traces import TraceStore
 
     store = TraceStore(trace_root) if trace_root else TraceStore()
+    if summary:
+        summaries = store.list_summaries()
+        if not summaries:
+            typer.echo("No traces found.")
+            return
+        for item in summaries:
+            typer.echo(
+                f"{item['trace_id']} | {item['skill_id']} | {item['status']} | "
+                f"{item['node_count']} nodes | {item['op_signature']}"
+            )
+        return
+
     ids = store.list_ids()
     if not ids:
         typer.echo("No traces found.")
@@ -753,6 +769,18 @@ def promote_candidates(
             typer.echo(f"  Inferred inputs: {', '.join(c.inferred_inputs)}")
         if c.inferred_outputs:
             typer.echo(f"  Inferred outputs: {', '.join(c.inferred_outputs)}")
+        example_ids = c.trace_ids[:3]
+        if example_ids:
+            typer.echo(f"  Inspect examples:")
+            for tid in example_ids:
+                try:
+                    summary = store.summarise(tid)
+                    typer.echo(
+                        f"    - {tid} | {summary['skill_id']} | "
+                        f"{summary['status']} | {summary['node_count']} nodes"
+                    )
+                except FileNotFoundError:
+                    typer.echo(f"    - {tid}")
         typer.echo(f"  Notes: {c.notes}")
         typer.echo()
 

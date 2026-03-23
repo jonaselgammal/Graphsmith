@@ -191,10 +191,12 @@ class TestTraceSummary:
         s = store.summarise(tid)
         assert s["trace_id"] == tid
         assert s["skill_id"] == "test.minimal.v1"
+        assert s["started_at"] is not None
         assert s["status"] == "ok"
         assert s["node_count"] == 1
         assert s["child_trace_count"] == 0
         assert s["op_signature"] == "template.render"
+        assert "text" in s["input_keys"]
         assert "result" in s["output_keys"]
 
     def test_summary_duration(self, store: TraceStore, tmp_path: Path) -> None:
@@ -207,6 +209,13 @@ class TestTraceSummary:
     def test_summary_not_found(self, store: TraceStore) -> None:
         with pytest.raises(FileNotFoundError):
             store.summarise("nonexistent")
+
+    def test_list_summaries(self, store: TraceStore, tmp_path: Path) -> None:
+        trace = _run_minimal(tmp_path / "run1")
+        tid = store.save(trace)
+        items = store.list_summaries()
+        assert len(items) == 1
+        assert items[0]["trace_id"] == tid
 
 
 # ── trace pruning ────────────────────────────────────────────────────
