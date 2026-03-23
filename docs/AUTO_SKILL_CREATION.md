@@ -102,3 +102,13 @@ that failed:
 
 This is intended to make battle-testing easier: failures are still
 bounded, but easier to classify and debug.
+
+## Smoke battery
+
+For a small end-to-end regression check of the CLI flow, run:
+
+```bash
+python scripts/run_autogen_battery.py
+```
+
+See [Autogen Battery](AUTOGEN_BATTERY.md) for details.

@@ -1,0 +1,30 @@
+[
+  {
+    "goal": "uppercase text",
+    "expected": "pass",
+    "template_key": "uppercase",
+    "must_contain": ["Skill: text.uppercase.v1", "Validation: PASS"]
+  },
+  {
+    "goal": "compute the median of numbers",
+    "expected": "pass",
+    "template_key": "median",
+    "must_contain": ["Skill: math.median.v1", "Validation: PASS"]
+  },
+  {
+    "goal": "check if json has key",
+    "expected": "pass",
+    "template_key": "has_key",
+    "must_contain": ["Skill: json.has_key.v1", "Validation: PASS"]
+  },
+  {
+    "goal": "fetch data from http API",
+    "expected": "out_of_scope",
+    "must_contain": ["Out of scope"]
+  },
+  {
+    "goal": "frobnicate the gizmo",
+    "expected": "no_match",
+    "must_contain": ["Could not match goal"]
+  }
+]
