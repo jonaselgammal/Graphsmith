@@ -283,7 +283,7 @@ class TestLLMBackendParsing:
 
 
 class TestCLIPlannerBackend:
-    def test_plan_with_mock_backend_default(self, tmp_path: Path) -> None:
+    def test_plan_with_auto_backend_default(self, tmp_path: Path) -> None:
         from typer.testing import CliRunner
         from graphsmith.cli.main import app
         runner = CliRunner()
@@ -300,6 +300,36 @@ class TestCLIPlannerBackend:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["status"] == "success"
+
+    def test_resolve_auto_backend_prefers_mock_without_provider(self) -> None:
+        from graphsmith.cli.main import _resolve_planner_backend_name
+
+        backend = _resolve_planner_backend_name(
+            "auto",
+            mock_llm=False,
+            provider="echo",
+            model=None,
+            base_url=None,
+        )
+        assert backend == "mock"
+
+    def test_resolve_auto_backend_prefers_ir_when_llm_is_requested(self) -> None:
+        from graphsmith.cli.main import _resolve_planner_backend_name
+
+        assert _resolve_planner_backend_name(
+            "auto",
+            mock_llm=True,
+            provider="echo",
+            model=None,
+            base_url=None,
+        ) == "ir"
+        assert _resolve_planner_backend_name(
+            "auto",
+            mock_llm=False,
+            provider="anthropic",
+            model=None,
+            base_url=None,
+        ) == "ir"
 
     def test_plan_with_llm_backend_missing_api_key_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from typer.testing import CliRunner
