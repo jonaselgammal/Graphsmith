@@ -384,6 +384,10 @@ def plan(
         "text", "--output-format",
         help="Output format: text or json.",
     ),
+    show_retrieval: bool = typer.Option(
+        False, "--show-retrieval",
+        help="Show retrieval diagnostics in text output.",
+    ),
     backend: str = typer.Option(
         "auto", "--backend",
         help="Planner backend: auto, mock, llm, or ir.",
@@ -451,6 +455,22 @@ def plan(
         typer.echo(f"\nCandidates considered ({len(result.candidates_considered)}):")
         for c in result.candidates_considered:
             typer.echo(f"  - {c}")
+
+    if show_retrieval and result.retrieval:
+        typer.echo(
+            f"\nRetrieval [{result.retrieval.mode}] "
+            f"({result.retrieval.candidate_count} candidates):"
+        )
+        if result.retrieval.raw_tokens:
+            typer.echo(f"  Raw tokens: {', '.join(result.retrieval.raw_tokens)}")
+        if result.retrieval.expanded_tokens:
+            typer.echo(f"  Expanded tokens: {', '.join(result.retrieval.expanded_tokens)}")
+        for skill_id in result.retrieval.candidates:
+            score = result.retrieval.scores.get(skill_id)
+            if score is None:
+                typer.echo(f"  - {skill_id}")
+            else:
+                typer.echo(f"  - {skill_id} (score: {score})")
 
     if result.graph:
         g = result.graph

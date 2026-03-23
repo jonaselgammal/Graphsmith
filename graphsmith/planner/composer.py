@@ -12,7 +12,7 @@ from graphsmith.models.package import ExamplesFile
 from graphsmith.models.skill import SkillMetadata
 from graphsmith.ops.llm_provider import LLMProvider
 from graphsmith.planner.backend import PlannerBackend
-from graphsmith.planner.candidates import retrieve_candidates
+from graphsmith.planner.candidates import retrieve_candidates_with_diagnostics
 from graphsmith.planner.models import (
     GlueGraph,
     PlanRequest,
@@ -39,7 +39,9 @@ def compose_plan(
     or 'failure' and the validation error is attached as a hole.
     """
     # 1. Retrieve candidates
-    candidates = retrieve_candidates(goal, registry, max_candidates=max_candidates)
+    retrieval, candidates = retrieve_candidates_with_diagnostics(
+        goal, registry, max_candidates=max_candidates,
+    )
 
     # 2. Build request
     request = PlanRequest(
@@ -54,6 +56,7 @@ def compose_plan(
     result.candidates_considered = [
         f"{c.id}@{c.version}" for c in candidates
     ]
+    result.retrieval = retrieval
 
     # 4. Validate the graph if present
     if result.graph is not None:

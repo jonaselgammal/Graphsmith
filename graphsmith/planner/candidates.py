@@ -187,19 +187,48 @@ def _relevance_score(
     tag_words: set[str] = set()
     for t in entry.tags:
         tag_words.update(re.findall(r"[a-z0-9]+", t.lower()))
-    all_words = id_words | name_words | desc_words | tag_words
+    input_words: set[str] = set()
+    output_words: set[str] = set()
+    effect_words: set[str] = set()
+    for name in (
+        entry.input_names
+        + entry.required_input_names
+        + entry.optional_input_names
+    ):
+        input_words.update(re.findall(r"[a-z0-9]+", name.lower()))
+    for name in entry.output_names:
+        output_words.update(re.findall(r"[a-z0-9]+", name.lower()))
+    for effect in entry.effects:
+        effect_words.update(re.findall(r"[a-z0-9]+", effect.lower()))
+
+    all_words = (
+        id_words | name_words | desc_words | tag_words
+        | input_words | output_words | effect_words
+    )
 
     if use_stems:
         tag_stems = {_stem(w) for w in tag_words}
+        input_stems = {_stem(w) for w in input_words}
+        output_stems = {_stem(w) for w in output_words}
+        effect_stems = {_stem(w) for w in effect_words}
         all_stems = {_stem(w) for w in all_words}
     else:
         tag_stems = tag_words
+        input_stems = input_words
+        output_stems = output_words
+        effect_stems = effect_words
         all_stems = all_words
 
     score = 0
     for token in tokens:
         t = _stem(token) if use_stems else token
         if t in tag_stems:
+            score += 3
+        elif t in output_stems:
+            score += 3
+        elif t in input_stems:
+            score += 2
+        elif t in effect_stems:
             score += 2
         elif t in all_stems:
             score += 1
