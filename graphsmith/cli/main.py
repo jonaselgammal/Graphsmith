@@ -1112,27 +1112,58 @@ def promote_candidates(
 @app.command()
 def ui(
     port: int = typer.Option(8741, "--port", help="Local server port."),
+    provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL."),
+    candidates: int = typer.Option(3, "--candidates", help="IR candidates."),
 ) -> None:
-    """Launch the local plan inspector UI in your browser."""
+    """Launch the local graph UI for plan inspection and refinement."""
     import http.server
+    import tempfile
     import threading
     import webbrowser
+
+    if model is None:
+        model = "claude-haiku-4-5-20251001" if provider == "anthropic" else "llama-3.1-8b-instant"
 
     ui_dir = Path(__file__).resolve().parent.parent.parent / "ui"
     if not (ui_dir / "index.html").exists():
         typer.secho("FAIL: ui/index.html not found.", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            super().__init__(*args, directory=str(ui_dir), **kwargs)
-        def log_message(self, fmt: str, *args: Any) -> None:
-            pass  # suppress request logs
+    # Build registry
+    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
+    reg_dir = tempfile.mkdtemp()
+    from graphsmith.registry.local import LocalRegistry
+    from graphsmith.parser import load_skill_package
+
+    reg = LocalRegistry(reg_dir)
+    for d in sorted(skills_dir.iterdir()):
+        if d.is_dir() and (d / "skill.yaml").exists():
+            try:
+                reg.publish(str(d))
+            except Exception:
+                pass
+
+    # Build backend
+    try:
+        from graphsmith.ops.providers import create_provider
+        llm = create_provider(provider, model=model, base_url=base_url)
+    except Exception as exc:
+        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    from graphsmith.planner.ir_backend import IRPlannerBackend
+    from graphsmith.ui.server import UIState, create_handler
+
+    backend = IRPlannerBackend(llm, candidate_count=candidates, use_decomposition=True)
+    state = UIState(backend, reg)
+    Handler = create_handler(state, ui_dir)
 
     url = f"http://localhost:{port}"
-    typer.echo(f"Graphsmith Inspector running at {url}")
+    typer.echo(f"Graphsmith UI running at {url}")
+    typer.echo(f"Provider: {provider} | Model: {model} | Candidates: {candidates}")
     typer.echo("Press Ctrl+C to stop.\n")
-    typer.echo(f"Open a plan: drag a JSON file onto the page, or use the file picker.")
 
     server = http.server.HTTPServer(("localhost", port), Handler)
     threading.Timer(0.5, lambda: webbrowser.open(url)).start()

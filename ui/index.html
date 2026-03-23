@@ -3,346 +3,431 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Graphsmith Plan Inspector</title>
+<title>Graphsmith</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; display: flex; height: 100vh; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; display: flex; height: 100vh; font-size: 13px; }
 
-  /* Sidebar */
-  #sidebar { width: 320px; background: #fff; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow: hidden; }
-  #sidebar-header { padding: 16px; border-bottom: 1px solid #eee; }
-  #sidebar-header h1 { font-size: 18px; margin-bottom: 8px; }
-  #sidebar-header p { font-size: 12px; color: #666; }
-  #load-section { padding: 12px 16px; border-bottom: 1px solid #eee; }
-  #load-section button, #load-section label { display: inline-block; padding: 6px 12px; background: #0066cc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; margin-right: 6px; }
-  #load-section button:hover, #load-section label:hover { background: #0055aa; }
-  #load-section input[type=file] { display: none; }
-  #detail-panel { flex: 1; overflow-y: auto; padding: 16px; font-size: 13px; }
-  #detail-panel h3 { margin-bottom: 8px; font-size: 14px; color: #333; }
-  .detail-section { margin-bottom: 16px; }
-  .detail-section h4 { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
-  .detail-kv { display: flex; margin-bottom: 2px; }
-  .detail-kv .k { color: #666; min-width: 80px; }
-  .detail-kv .v { color: #1a1a1a; word-break: break-all; }
-  .tag { display: inline-block; background: #e8f4f8; color: #0066cc; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin: 1px; }
-  #mermaid-output { display: none; padding: 16px; }
-  #mermaid-output pre { background: #f0f0f0; padding: 12px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  /* Left panel */
+  #left { width: 340px; background: #fff; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow: hidden; }
+  #header { padding: 14px 16px; border-bottom: 1px solid #eee; }
+  #header h1 { font-size: 17px; margin-bottom: 2px; }
+  #header .sub { font-size: 11px; color: #888; }
+
+  /* Goal input */
+  #goal-section { padding: 12px 16px; border-bottom: 1px solid #eee; }
+  #goal-input { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 13px; resize: none; height: 56px; font-family: inherit; }
+  #goal-input:focus { outline: none; border-color: #0066cc; }
+  .btn { display: inline-block; padding: 6px 14px; background: #0066cc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-top: 6px; margin-right: 4px; }
+  .btn:hover { background: #0055aa; }
+  .btn.secondary { background: #666; }
+  .btn.secondary:hover { background: #555; }
+  .btn:disabled { background: #aaa; cursor: default; }
+
+  /* Tabs */
+  #tabs { display: flex; border-bottom: 1px solid #eee; }
+  .tab { flex: 1; padding: 8px 4px; text-align: center; cursor: pointer; font-size: 11px; color: #666; border-bottom: 2px solid transparent; transition: 0.15s; }
+  .tab:hover { color: #333; }
+  .tab.active { color: #0066cc; border-bottom-color: #0066cc; font-weight: 600; }
+
+  /* Tab content */
+  .tab-content { display: none; flex: 1; overflow-y: auto; padding: 12px 16px; }
+  .tab-content.active { display: block; }
+  .section { margin-bottom: 14px; }
+  .section h4 { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.5px; }
+  .kv { display: flex; margin-bottom: 2px; line-height: 1.5; }
+  .kv .k { color: #888; min-width: 75px; flex-shrink: 0; }
+  .kv .v { color: #1a1a1a; word-break: break-word; }
+  .tag { display: inline-block; background: #eef2ff; color: #4338ca; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin: 1px 2px; }
+  .tag.green { background: #dcfce7; color: #166534; }
+  .tag.red { background: #fef2f2; color: #991b1b; }
+  .tag.yellow { background: #fefce8; color: #854d0e; }
+
+  /* Candidate list */
+  .cand { padding: 8px; margin-bottom: 6px; border: 1px solid #eee; border-radius: 5px; cursor: pointer; }
+  .cand:hover { border-color: #0066cc; }
+  .cand.selected { border-color: #0066cc; background: #f0f7ff; }
+  .cand-header { display: flex; justify-content: space-between; font-weight: 600; }
+  .cand-steps { color: #666; font-size: 11px; margin-top: 2px; }
+
+  /* Refine */
+  #refine-input { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 13px; font-family: inherit; margin-bottom: 6px; }
+  .delta-item { padding: 4px 8px; background: #fefce8; border-left: 3px solid #eab308; margin-bottom: 4px; font-size: 12px; }
+  .diff-add { color: #166534; }
+  .diff-remove { color: #991b1b; }
+
+  /* Version list */
+  .version { padding: 6px 8px; border: 1px solid #eee; border-radius: 4px; margin-bottom: 4px; cursor: pointer; font-size: 12px; }
+  .version:hover { border-color: #0066cc; }
+  .version.current { border-color: #0066cc; background: #f0f7ff; }
 
   /* Canvas */
-  #canvas { flex: 1; position: relative; overflow: hidden; }
+  #canvas { flex: 1; position: relative; overflow: hidden; background: #fafafa; }
   #canvas svg { width: 100%; height: 100%; }
   .node-group { cursor: pointer; }
   .node-rect { rx: 6; ry: 6; stroke-width: 2; }
-  .node-rect.input-node { fill: #e8f4f8; stroke: #0066cc; }
-  .node-rect.output-node { fill: #e8f8e8; stroke: #28a745; }
-  .node-rect.skill-node { fill: #fff; stroke: #666; }
-  .node-rect.skill-node.selected { stroke: #0066cc; stroke-width: 3; }
+  .node-rect.input-node { fill: #e8f4f8; stroke: #0284c7; }
+  .node-rect.output-node { fill: #dcfce7; stroke: #16a34a; }
+  .node-rect.skill-node { fill: #fff; stroke: #9ca3af; }
+  .node-rect.skill-node.selected { stroke: #0066cc; stroke-width: 3; fill: #f0f7ff; }
   .node-label { font-size: 12px; fill: #1a1a1a; text-anchor: middle; font-weight: 600; }
   .node-sublabel { font-size: 10px; fill: #666; text-anchor: middle; }
-  .edge-line { stroke: #999; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
-  .edge-label { font-size: 10px; fill: #666; }
-
-  /* Drop zone */
-  #drop-zone { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,102,204,0.05); border: 3px dashed #0066cc; border-radius: 12px; margin: 40px; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
-  #drop-zone.active { opacity: 1; }
-  #drop-zone p { font-size: 18px; color: #0066cc; }
-  #empty-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 16px; }
+  .edge-line { stroke: #9ca3af; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
+  .edge-label { font-size: 9px; fill: #9ca3af; }
+  #empty-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 15px; }
+  #status-bar { position: absolute; bottom: 0; left: 0; right: 0; padding: 6px 14px; background: rgba(255,255,255,0.9); border-top: 1px solid #eee; font-size: 11px; color: #666; }
 </style>
 </head>
 <body>
 
-<div id="sidebar">
-  <div id="sidebar-header">
-    <h1>Graphsmith Inspector</h1>
-    <p>Load a saved plan to inspect its graph</p>
+<div id="left">
+  <div id="header">
+    <h1>Graphsmith</h1>
+    <div class="sub">Plan inspector + interactive refinement</div>
   </div>
-  <div id="load-section">
-    <label for="file-input">Open Plan JSON</label>
-    <input type="file" id="file-input" accept=".json">
-    <button id="export-mermaid-btn" style="display:none;">Export Mermaid</button>
+
+  <div id="goal-section">
+    <textarea id="goal-input" placeholder="Enter a goal, e.g.: normalize this text and extract keywords"></textarea>
+    <button class="btn" id="run-btn" onclick="runGoal()">Plan</button>
+    <button class="btn secondary" id="refine-toggle" onclick="showRefine()" style="display:none;">Refine</button>
   </div>
-  <div id="detail-panel">
+
+  <div id="tabs">
+    <div class="tab active" data-tab="plan" onclick="switchTab('plan')">Plan</div>
+    <div class="tab" data-tab="candidates" onclick="switchTab('candidates')">Candidates</div>
+    <div class="tab" data-tab="refine" onclick="switchTab('refine')">Refine</div>
+    <div class="tab" data-tab="versions" onclick="switchTab('versions')">Versions</div>
+  </div>
+
+  <!-- Plan tab -->
+  <div class="tab-content active" id="tab-plan">
+    <div id="plan-empty" style="color:#aaa;padding:20px 0;text-align:center;">Run a goal to see the plan</div>
     <div id="plan-info" style="display:none;"></div>
     <div id="node-detail" style="display:none;"></div>
   </div>
-  <div id="mermaid-output">
-    <h4>Mermaid Export</h4>
-    <pre id="mermaid-code"></pre>
-    <button onclick="copyMermaid()" style="margin-top:8px;padding:4px 8px;font-size:12px;cursor:pointer;">Copy</button>
+
+  <!-- Candidates tab -->
+  <div class="tab-content" id="tab-candidates">
+    <div id="cand-list"></div>
+  </div>
+
+  <!-- Refine tab -->
+  <div class="tab-content" id="tab-refine">
+    <div class="section">
+      <h4>Refinement Request</h4>
+      <input type="text" id="refine-input" placeholder="e.g.: also keep the normalized text">
+      <button class="btn" onclick="applyRefine()">Apply</button>
+    </div>
+    <div id="refine-result"></div>
+  </div>
+
+  <!-- Versions tab -->
+  <div class="tab-content" id="tab-versions">
+    <div id="version-list"></div>
+    <div id="diff-view"></div>
   </div>
 </div>
 
 <div id="canvas">
-  <div id="empty-state">Drop a plan JSON file here or click "Open Plan JSON"</div>
-  <div id="drop-zone"><p>Drop plan JSON here</p></div>
+  <div id="empty-state">Enter a goal and click Plan</div>
   <svg id="graph-svg">
     <defs>
       <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-        <polygon points="0 0, 10 3.5, 0 7" fill="#999"/>
+        <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af"/>
       </marker>
     </defs>
   </svg>
+  <div id="status-bar"></div>
 </div>
 
 <script>
-const fileInput = document.getElementById('file-input');
-const canvas = document.getElementById('canvas');
+const goalInput = document.getElementById('goal-input');
 const svg = document.getElementById('graph-svg');
 const emptyState = document.getElementById('empty-state');
-const dropZone = document.getElementById('drop-zone');
+const statusBar = document.getElementById('status-bar');
 const planInfo = document.getElementById('plan-info');
+const planEmpty = document.getElementById('plan-empty');
 const nodeDetail = document.getElementById('node-detail');
-const exportBtn = document.getElementById('export-mermaid-btn');
-const mermaidOutput = document.getElementById('mermaid-output');
-const mermaidCode = document.getElementById('mermaid-code');
+const candList = document.getElementById('cand-list');
+const refineResult = document.getElementById('refine-result');
+const versionList = document.getElementById('version-list');
+const diffView = document.getElementById('diff-view');
+const refineToggle = document.getElementById('refine-toggle');
 
-let currentPlan = null;
-let selectedNodeId = null;
+let currentGraph = null;
 
-// File loading
-fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+goalInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runGoal(); } });
 
-canvas.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('active'); });
-canvas.addEventListener('dragleave', () => dropZone.classList.remove('active'));
-canvas.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('active');
-  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
-});
-
-function loadFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const plan = JSON.parse(e.target.result);
-      if (!plan.graph || !plan.graph.nodes) throw new Error('Not a valid GlueGraph');
-      currentPlan = plan;
-      renderGraph(plan);
-      showPlanInfo(plan);
-      emptyState.style.display = 'none';
-      exportBtn.style.display = 'inline-block';
-      mermaidOutput.style.display = 'none';
-    } catch (err) {
-      alert('Failed to load plan: ' + err.message);
-    }
-  };
-  reader.readAsText(file);
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === 'tab-' + name));
 }
 
-function showPlanInfo(plan) {
-  const inputs = (plan.inputs || []).map(i => i.name).join(', ');
-  const outputs = (plan.outputs || []).map(o => o.name).join(', ');
-  const effects = (plan.effects || []).join(', ') || 'pure';
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return resp.json();
+}
+
+async function runGoal() {
+  const goal = goalInput.value.trim();
+  if (!goal) return;
+  statusBar.textContent = 'Planning...';
+  document.getElementById('run-btn').disabled = true;
+  try {
+    const result = await api('POST', '/api/plan', { goal });
+    if (result.status === 'success') {
+      currentGraph = result.graph;
+      renderGraph(result.graph);
+      showPlanInfo(result.graph, result.decomposition);
+      showCandidates(result.candidates || []);
+      emptyState.style.display = 'none';
+      refineToggle.style.display = 'inline-block';
+      statusBar.textContent = `Plan v${result.version}: ${result.graph.graph.nodes.length} steps`;
+      loadVersions();
+    } else {
+      statusBar.textContent = 'Planning failed: ' + (result.error || 'unknown');
+    }
+  } catch (err) {
+    statusBar.textContent = 'Error: ' + err.message;
+  }
+  document.getElementById('run-btn').disabled = false;
+}
+
+function showRefine() { switchTab('refine'); }
+
+async function applyRefine() {
+  const req = document.getElementById('refine-input').value.trim();
+  if (!req) return;
+  statusBar.textContent = 'Refining...';
+  try {
+    const result = await api('POST', '/api/refine', { request: req });
+    if (result.status === 'success') {
+      currentGraph = result.graph;
+      renderGraph(result.graph);
+      showPlanInfo(result.graph, result.decomposition);
+      showCandidates(result.candidates || []);
+      emptyState.style.display = 'none';
+      statusBar.textContent = `Refined plan v${result.version}`;
+
+      let html = '';
+      if (result.delta && result.delta.length) {
+        html += '<div class="section"><h4>Parsed Delta</h4>';
+        result.delta.forEach(d => { html += `<div class="delta-item">${d.kind}(${d.target})</div>`; });
+        html += '</div>';
+      }
+      if (result.diff) {
+        html += '<div class="section"><h4>Diff</h4>';
+        (result.diff.added_steps||[]).forEach(s => { html += `<div class="diff-add">+ ${s}</div>`; });
+        (result.diff.removed_steps||[]).forEach(s => { html += `<div class="diff-remove">- ${s}</div>`; });
+        (result.diff.added_outputs||[]).forEach(s => { html += `<div class="diff-add">+ output: ${s}</div>`; });
+        (result.diff.removed_outputs||[]).forEach(s => { html += `<div class="diff-remove">- output: ${s}</div>`; });
+        if (!(result.diff.added_steps||[]).length && !(result.diff.removed_steps||[]).length &&
+            !(result.diff.added_outputs||[]).length && !(result.diff.removed_outputs||[]).length) {
+          html += '<div style="color:#888;">(no structural changes)</div>';
+        }
+        html += '</div>';
+      }
+      refineResult.innerHTML = html;
+      loadVersions();
+    } else {
+      statusBar.textContent = 'Refinement failed: ' + (result.error || '');
+    }
+  } catch (err) {
+    statusBar.textContent = 'Error: ' + err.message;
+  }
+}
+
+function showPlanInfo(graph, decomp) {
+  planEmpty.style.display = 'none';
   planInfo.style.display = 'block';
   nodeDetail.style.display = 'none';
-  planInfo.innerHTML = `
-    <div class="detail-section">
-      <h3>${plan.goal || 'Plan'}</h3>
-    </div>
-    <div class="detail-section">
-      <h4>Inputs</h4>
-      ${(plan.inputs||[]).map(i => `<div class="detail-kv"><span class="k">${i.name}</span><span class="v">${i.type}</span></div>`).join('')}
-    </div>
-    <div class="detail-section">
-      <h4>Outputs</h4>
-      ${(plan.outputs||[]).map(o => `<div class="detail-kv"><span class="k">${o.name}</span><span class="v">${o.type}</span></div>`).join('')}
-    </div>
-    <div class="detail-section">
-      <h4>Effects</h4>
-      <div>${(plan.effects||['pure']).map(e => `<span class="tag">${e}</span>`).join(' ')}</div>
-    </div>
-    <div class="detail-section">
-      <h4>Graph Outputs</h4>
-      ${Object.entries(plan.graph.outputs||{}).map(([k,v]) => `<div class="detail-kv"><span class="k">${k}</span><span class="v">← ${v}</span></div>`).join('')}
-    </div>
-    <div class="detail-section" style="color:#999;font-size:11px;">Click a node for details</div>
-  `;
+  const nodes = graph.graph.nodes || [];
+  const flow = nodes.map(n => n.id).join(' \u2192 ');
+  let html = `<div class="section"><h4>Goal</h4><div>${graph.goal}</div></div>`;
+  html += `<div class="section"><h4>Flow</h4><div style="font-weight:600;">${flow}</div></div>`;
+  html += '<div class="section"><h4>Steps</h4>';
+  nodes.forEach((n, i) => {
+    const skill = (n.config||{}).skill_id || n.op;
+    html += `<div class="kv"><span class="k">${i+1}.</span><span class="v">${n.id} <span class="tag">${skill}</span></span></div>`;
+  });
+  html += '</div>';
+  html += '<div class="section"><h4>Outputs</h4>';
+  Object.entries(graph.graph.outputs||{}).forEach(([k,v]) => {
+    html += `<div class="kv"><span class="k">${k}</span><span class="v">\u2190 ${v}</span></div>`;
+  });
+  html += '</div>';
+  if (decomp && decomp.content_transforms) {
+    html += '<div class="section"><h4>Decomposition</h4>';
+    html += `<div>${(decomp.content_transforms||[]).map(t => `<span class="tag">${t}</span>`).join(' ')}</div>`;
+    html += `<div style="margin-top:4px;"><span class="tag yellow">${decomp.presentation||'none'}</span></div>`;
+    html += '</div>';
+  }
+  html += '<div style="color:#aaa;font-size:11px;margin-top:12px;">Click a node in the graph for details</div>';
+  planInfo.innerHTML = html;
 }
 
 function showNodeDetail(node) {
-  selectedNodeId = node.id;
   nodeDetail.style.display = 'block';
-  const skillId = (node.config||{}).skill_id || '';
-  const version = (node.config||{}).version || '';
-  nodeDetail.innerHTML = `
-    <div class="detail-section">
-      <h3>Node: ${node.id}</h3>
-    </div>
-    <div class="detail-section">
-      <h4>Operation</h4>
-      <div class="detail-kv"><span class="k">op</span><span class="v">${node.op}</span></div>
-      ${skillId ? `<div class="detail-kv"><span class="k">skill</span><span class="v">${skillId}@${version}</span></div>` : ''}
-    </div>
-    ${Object.keys(node.config||{}).length ? `
-    <div class="detail-section">
-      <h4>Config</h4>
-      ${Object.entries(node.config||{}).map(([k,v]) => `<div class="detail-kv"><span class="k">${k}</span><span class="v">${JSON.stringify(v)}</span></div>`).join('')}
-    </div>` : ''}
-    ${Object.keys(node.inputs||{}).length ? `
-    <div class="detail-section">
-      <h4>Node Inputs</h4>
-      ${Object.entries(node.inputs||{}).map(([k,v]) => `<div class="detail-kv"><span class="k">${k}</span><span class="v">← ${v}</span></div>`).join('')}
-    </div>` : ''}
-  `;
+  const skill = (node.config||{}).skill_id || '';
+  let html = `<div class="section"><h4>Node: ${node.id}</h4></div>`;
+  html += `<div class="section"><div class="kv"><span class="k">op</span><span class="v">${node.op}</span></div>`;
+  if (skill) html += `<div class="kv"><span class="k">skill</span><span class="v">${skill}</span></div>`;
+  html += '</div>';
+  if (Object.keys(node.config||{}).length > 2) {
+    html += '<div class="section"><h4>Config</h4>';
+    Object.entries(node.config).forEach(([k,v]) => {
+      if (k !== 'skill_id' && k !== 'version')
+        html += `<div class="kv"><span class="k">${k}</span><span class="v">${JSON.stringify(v)}</span></div>`;
+    });
+    html += '</div>';
+  }
+  nodeDetail.innerHTML = html;
   highlightNode(node.id);
 }
 
-// Graph rendering
+function showCandidates(candidates) {
+  if (!candidates.length) { candList.innerHTML = '<div style="color:#aaa;">No candidates</div>'; return; }
+  let html = '';
+  candidates.forEach(c => {
+    const sel = c.selected ? ' selected' : '';
+    const badge = c.selected ? '<span class="tag green">selected</span>' : '';
+    const score = c.score !== undefined ? c.score.toFixed(0) : '-';
+    html += `<div class="cand${sel}">`;
+    html += `<div class="cand-header"><span>Candidate ${c.index+1} ${badge}</span><span>${score}</span></div>`;
+    if (c.steps) html += `<div class="cand-steps">${c.steps.join(' \u2192 ')}</div>`;
+    if (c.status !== 'compiled') html += `<div class="cand-steps" style="color:#991b1b;">${c.status}: ${(c.error||'').slice(0,50)}</div>`;
+    if (c.penalties && c.penalties.length) html += `<div class="cand-steps">${c.penalties.map(p => `<span class="tag red">${p}</span>`).join(' ')}</div>`;
+    html += '</div>';
+  });
+  candList.innerHTML = html;
+}
+
+async function loadVersions() {
+  const versions = await api('GET', '/api/versions');
+  let html = '';
+  versions.forEach((v, i) => {
+    const cls = i === versions.length - 1 ? ' current' : '';
+    html += `<div class="version${cls}" onclick="loadVersion(${v.index})">${v.label}</div>`;
+  });
+  versionList.innerHTML = html;
+
+  if (versions.length >= 2) {
+    const diff = await api('GET', '/api/diff');
+    let dhtml = '<div class="section"><h4>Last Diff</h4>';
+    (diff.added_steps||[]).forEach(s => { dhtml += `<div class="diff-add">+ ${s}</div>`; });
+    (diff.removed_steps||[]).forEach(s => { dhtml += `<div class="diff-remove">- ${s}</div>`; });
+    (diff.added_outputs||[]).forEach(s => { dhtml += `<div class="diff-add">+ output: ${s}</div>`; });
+    (diff.removed_outputs||[]).forEach(s => { dhtml += `<div class="diff-remove">- output: ${s}</div>`; });
+    dhtml += '</div>';
+    diffView.innerHTML = dhtml;
+  }
+}
+
+async function loadVersion(idx) {
+  const v = await api('GET', `/api/version/${idx}`);
+  if (v && v.graph) { currentGraph = v.graph; renderGraph(v.graph); showPlanInfo(v.graph, {}); }
+}
+
+// ── Graph rendering (reused from existing) ──────────────────────
+
 function renderGraph(plan) {
   const nodes = plan.graph.nodes || [];
   const edges = plan.graph.edges || [];
   const graphOutputs = plan.graph.outputs || {};
+  const canvasEl = document.getElementById('canvas');
 
-  // Layout: topological levels
-  const adj = {};
-  const indeg = {};
+  const adj = {}, indeg = {};
   nodes.forEach(n => { adj[n.id] = []; indeg[n.id] = 0; });
   edges.forEach(e => {
-    const src = e.from_ ? e.from_.split('.')[0] : (e.from || '').split('.')[0];
+    const src = (e.from_ || e.from || '').split('.')[0];
     const dst = (e.to || '').split('.')[0];
     if (src !== 'input' && adj[src] !== undefined && indeg[dst] !== undefined) {
-      adj[src].push(dst);
-      indeg[dst]++;
+      adj[src].push(dst); indeg[dst]++;
     }
   });
 
-  // Topo sort into levels
   const levels = [];
   let queue = Object.keys(indeg).filter(k => indeg[k] === 0).sort();
   while (queue.length) {
     levels.push([...queue]);
     const next = [];
-    queue.forEach(n => {
-      (adj[n]||[]).forEach(m => {
-        indeg[m]--;
-        if (indeg[m] === 0) next.push(m);
-      });
-    });
+    queue.forEach(n => { (adj[n]||[]).forEach(m => { indeg[m]--; if (indeg[m] === 0) next.push(m); }); });
     queue = next.sort();
   }
 
-  // Position calculation
-  const nodeW = 160, nodeH = 50, levelGap = 100, nodeGap = 30;
-  const totalLevels = levels.length + 2; // +input, +output
-  const svgW = canvas.clientWidth;
-  const svgH = canvas.clientHeight;
-  const startY = 60;
-
+  const nodeW = 160, nodeH = 50, levelGap = 90, nodeGap = 30;
+  const svgW = canvasEl.clientWidth, startY = 55;
   const positions = {};
+  const inputId = '__input__', outputId = '__output__';
 
-  // Input node
-  const inputId = '__input__';
-  positions[inputId] = { x: svgW/2, y: startY, w: nodeW, h: 40 };
-
-  // Skill nodes by level
+  positions[inputId] = { x: svgW/2, y: startY, w: nodeW, h: 38 };
   levels.forEach((level, li) => {
-    const y = startY + (li + 1) * (nodeH + levelGap);
-    const totalW = level.length * nodeW + (level.length - 1) * nodeGap;
-    const startX = (svgW - totalW) / 2 + nodeW/2;
-    level.forEach((nid, ni) => {
-      positions[nid] = { x: startX + ni * (nodeW + nodeGap), y, w: nodeW, h: nodeH };
-    });
+    const y = startY + (li+1) * (nodeH + levelGap);
+    const totalW = level.length * nodeW + (level.length-1) * nodeGap;
+    const sx = (svgW - totalW) / 2 + nodeW/2;
+    level.forEach((nid, ni) => { positions[nid] = { x: sx + ni*(nodeW+nodeGap), y, w: nodeW, h: nodeH }; });
   });
+  positions[outputId] = { x: svgW/2, y: startY + (levels.length+1)*(nodeH+levelGap), w: nodeW, h: 38 };
 
-  // Output node
-  const outputId = '__output__';
-  const outputY = startY + (levels.length + 1) * (nodeH + levelGap);
-  positions[outputId] = { x: svgW/2, y: outputY, w: nodeW, h: 40 };
+  svg.innerHTML = '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af"/></marker></defs>';
 
-  // Clear and render
-  svg.innerHTML = `<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#999"/></marker></defs>`;
-
-  // Edges
-  edges.forEach(e => {
-    const fromAddr = e.from_ || e.from || '';
-    const toAddr = e.to || '';
-    const srcScope = fromAddr.split('.')[0];
-    const srcPort = fromAddr.split('.').slice(1).join('.');
-    const dstScope = toAddr.split('.')[0];
-
-    const srcId = srcScope === 'input' ? inputId : srcScope;
-    const dstId = dstScope;
+  function drawEdge(srcId, dstId, label) {
     if (!positions[srcId] || !positions[dstId]) return;
-
     const x1 = positions[srcId].x, y1 = positions[srcId].y + positions[srcId].h/2;
     const x2 = positions[dstId].x, y2 = positions[dstId].y - positions[dstId].h/2;
-
+    const midY = (y1+y2)/2;
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    const midY = (y1 + y2) / 2;
     path.setAttribute('d', `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`);
     path.setAttribute('class', 'edge-line');
     svg.appendChild(path);
+    if (label) {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', (x1+x2)/2 + 8); t.setAttribute('y', midY - 4);
+      t.setAttribute('class', 'edge-label'); t.textContent = label;
+      svg.appendChild(t);
+    }
+  }
 
-    // Edge label
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', (x1+x2)/2 + 8);
-    label.setAttribute('y', midY - 4);
-    label.setAttribute('class', 'edge-label');
-    label.textContent = srcPort;
-    svg.appendChild(label);
+  edges.forEach(e => {
+    const fromAddr = e.from_ || e.from || '';
+    const srcScope = fromAddr.split('.')[0];
+    const srcPort = fromAddr.split('.').slice(1).join('.');
+    const dstScope = (e.to||'').split('.')[0];
+    drawEdge(srcScope === 'input' ? inputId : srcScope, dstScope, srcPort);
   });
-
-  // Output edges
   Object.entries(graphOutputs).forEach(([name, addr]) => {
-    const scope = addr.split('.')[0];
-    if (!positions[scope]) return;
-    const x1 = positions[scope].x, y1 = positions[scope].y + positions[scope].h/2;
-    const x2 = positions[outputId].x, y2 = positions[outputId].y - positions[outputId].h/2;
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    const midY = (y1 + y2) / 2;
-    path.setAttribute('d', `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`);
-    path.setAttribute('class', 'edge-line');
-    svg.appendChild(path);
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', (x1+x2)/2 + 8);
-    label.setAttribute('y', midY - 4);
-    label.setAttribute('class', 'edge-label');
-    label.textContent = name;
-    svg.appendChild(label);
+    drawEdge(addr.split('.')[0], outputId, name);
   });
 
-  // Input node
-  drawNode(inputId, 'Inputs', (plan.inputs||[]).map(i=>i.name).join(', '), 'input-node', positions[inputId]);
+  function drawNode(id, label, sublabel, cls, pos, onClick) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'node-group'); g.setAttribute('data-id', id);
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', pos.x-pos.w/2); rect.setAttribute('y', pos.y-pos.h/2);
+    rect.setAttribute('width', pos.w); rect.setAttribute('height', pos.h);
+    rect.setAttribute('class', `node-rect ${cls}`); g.appendChild(rect);
+    const t1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t1.setAttribute('x', pos.x); t1.setAttribute('y', pos.y-4);
+    t1.setAttribute('class', 'node-label'); t1.textContent = label; g.appendChild(t1);
+    const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t2.setAttribute('x', pos.x); t2.setAttribute('y', pos.y+12);
+    t2.setAttribute('class', 'node-sublabel');
+    t2.textContent = sublabel.length > 22 ? sublabel.slice(0,20)+'\u2026' : sublabel;
+    g.appendChild(t2);
+    if (onClick) g.addEventListener('click', onClick);
+    svg.appendChild(g);
+  }
 
-  // Skill nodes
+  const inputs = (plan.inputs||[]).map(i=>i.name).join(', ');
+  const outputs = (plan.outputs||[]).map(o=>o.name).join(', ');
+  drawNode(inputId, 'Inputs', inputs, 'input-node', positions[inputId]);
   nodes.forEach(n => {
     const skill = (n.config||{}).skill_id || n.op;
     drawNode(n.id, n.id, skill, 'skill-node', positions[n.id], () => showNodeDetail(n));
   });
-
-  // Output node
-  drawNode(outputId, 'Outputs', (plan.outputs||[]).map(o=>o.name).join(', '), 'output-node', positions[outputId]);
-}
-
-function drawNode(id, label, sublabel, cls, pos, onClick) {
-  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  g.setAttribute('class', 'node-group');
-  g.setAttribute('data-id', id);
-
-  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  rect.setAttribute('x', pos.x - pos.w/2);
-  rect.setAttribute('y', pos.y - pos.h/2);
-  rect.setAttribute('width', pos.w);
-  rect.setAttribute('height', pos.h);
-  rect.setAttribute('class', `node-rect ${cls}`);
-  g.appendChild(rect);
-
-  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  text.setAttribute('x', pos.x);
-  text.setAttribute('y', pos.y - 4);
-  text.setAttribute('class', 'node-label');
-  text.textContent = label;
-  g.appendChild(text);
-
-  const sub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  sub.setAttribute('x', pos.x);
-  sub.setAttribute('y', pos.y + 12);
-  sub.setAttribute('class', 'node-sublabel');
-  sub.textContent = sublabel.length > 22 ? sublabel.slice(0,20)+'…' : sublabel;
-  g.appendChild(sub);
-
-  if (onClick) g.addEventListener('click', onClick);
-  svg.appendChild(g);
+  drawNode(outputId, 'Outputs', outputs, 'output-node', positions[outputId]);
 }
 
 function highlightNode(id) {
@@ -351,45 +436,11 @@ function highlightNode(id) {
   if (g) g.querySelector('.node-rect').classList.add('selected');
 }
 
-// Mermaid export
-exportBtn.addEventListener('click', () => {
-  if (!currentPlan) return;
-  const lines = ['```mermaid', 'flowchart TD'];
-  const inputs = (currentPlan.inputs||[]).map(i=>i.name).join(', ');
-  const outputs = (currentPlan.outputs||[]).map(o=>o.name).join(', ');
-  lines.push(`    Inputs["Inputs<br/>${inputs}"]`);
-  (currentPlan.graph.nodes||[]).forEach(n => {
-    const skill = (n.config||{}).skill_id || n.op;
-    lines.push(`    ${n.id}["${n.id}<br/>${skill}"]`);
-  });
-  lines.push(`    Outputs["Outputs<br/>${outputs}"]`);
-  lines.push('');
-  (currentPlan.graph.edges||[]).forEach(e => {
-    const from = e.from_ || e.from || '';
-    const src = from.split('.')[0];
-    const port = from.split('.').slice(1).join('.');
-    const dst = (e.to||'').split('.')[0];
-    lines.push(`    ${src === 'input' ? 'Inputs' : src} -->|${port}| ${dst}`);
-  });
-  Object.entries(currentPlan.graph.outputs||{}).forEach(([name, addr]) => {
-    const scope = addr.split('.')[0];
-    lines.push(`    ${scope} -->|${name}| Outputs`);
-  });
-  lines.push('```');
-  mermaidCode.textContent = lines.join('\n');
-  mermaidOutput.style.display = 'block';
-});
-
-function copyMermaid() {
-  navigator.clipboard.writeText(mermaidCode.textContent);
-}
-
-// Handle canvas click to deselect
 svg.addEventListener('click', e => {
   if (!e.target.closest('.node-group')) {
-    selectedNodeId = null;
     svg.querySelectorAll('.node-rect.selected').forEach(r => r.classList.remove('selected'));
-    if (currentPlan) showPlanInfo(currentPlan);
+    if (currentGraph) showPlanInfo(currentGraph, {});
+    nodeDetail.style.display = 'none';
   }
 });
 </script>

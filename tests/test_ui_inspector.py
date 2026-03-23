@@ -20,18 +20,18 @@ class TestUIFiles:
         content = (UI_DIR / "index.html").read_text()
         assert "Graphsmith" in content
 
-    def test_index_html_has_file_input(self) -> None:
+    def test_index_html_has_goal_input(self) -> None:
         content = (UI_DIR / "index.html").read_text()
-        assert 'type="file"' in content
+        assert "goal-input" in content
 
     def test_index_html_has_svg(self) -> None:
         content = (UI_DIR / "index.html").read_text()
         assert "<svg" in content
 
-    def test_index_html_has_drag_drop(self) -> None:
+    def test_index_html_has_api_calls(self) -> None:
         content = (UI_DIR / "index.html").read_text()
-        assert "dragover" in content
-        assert "drop" in content
+        assert "/api/plan" in content
+        assert "/api/refine" in content
 
 
 class TestPlanLoadingForUI:
