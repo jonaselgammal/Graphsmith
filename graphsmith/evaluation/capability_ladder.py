@@ -25,6 +25,7 @@ class LadderTask(BaseModel):
     expected_skills: list[str] = Field(default_factory=list)
     closed_loop: bool = False
     tolerance: float = 0.0
+    bucket: str = ""
 
 
 def load_ladder_tasks(path: str | Path) -> list[LadderTask]:

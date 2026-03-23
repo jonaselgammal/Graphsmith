@@ -1,0 +1,189 @@
+[
+  {
+    "id": "A01", "bucket": "A", "level": 1,
+    "goal": "Clean this text up and pull out the keywords",
+    "input": {"text": "  AI   agents ARE transforming  SOFTWARE  "},
+    "expected_skills": ["text.normalize.v1", "text.extract_keywords.v1"],
+    "expected_output_names": ["normalized", "keywords"],
+    "closed_loop": false
+  },
+  {
+    "id": "A02", "bucket": "A", "level": 1,
+    "goal": "Summarize this text and tell me how many words it has",
+    "input": {"text": "Cats are popular pets. They sleep a lot and enjoy attention."},
+    "expected_skills": ["text.summarize.v1", "text.word_count.v1"],
+    "expected_output_names": ["summary"],
+    "closed_loop": false
+  },
+  {
+    "id": "A03", "bucket": "A", "level": 1,
+    "goal": "Normalize this text",
+    "input": {"text": "  HELLO   world  "},
+    "expected_output": {"normalized": "hello world"},
+    "expected_skills": ["text.normalize.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "A04", "bucket": "A", "level": 1,
+    "goal": "Compute the mean of these numbers",
+    "input": {"values": "10\n20\n30"},
+    "expected_output": {"result": "20"},
+    "expected_skills": ["math.mean.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "A05", "bucket": "A", "level": 1,
+    "goal": "Add these two numbers together",
+    "input": {"a": "17", "b": "25"},
+    "expected_output": {"result": "42"},
+    "expected_skills": ["math.add.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "B01", "bucket": "B", "level": 2,
+    "goal": "I just want the main topics from this paragraph",
+    "input": {"text": "Machine learning models are trained on large datasets to learn patterns."},
+    "expected_skills": ["text.extract_keywords.v1"],
+    "expected_output_names": ["keywords"],
+    "closed_loop": false
+  },
+  {
+    "id": "B02", "bucket": "B", "level": 2,
+    "goal": "Can you tidy this up, then give me the short version?",
+    "input": {"text": "  AI   is CHANGING  how we BUILD  software  "},
+    "expected_skills": ["text.normalize.v1", "text.summarize.v1"],
+    "expected_output_names": ["summary"],
+    "closed_loop": false
+  },
+  {
+    "id": "B03", "bucket": "B", "level": 2,
+    "goal": "Format the extracted keywords nicely as a list",
+    "input": {"text": "Graphsmith plans workflows using typed skill graphs."},
+    "expected_skills": ["text.extract_keywords.v1"],
+    "expected_output_names": ["joined", "keywords"],
+    "closed_loop": false
+  },
+  {
+    "id": "B04", "bucket": "B", "level": 2,
+    "goal": "Clean the text, capitalize it nicely, and extract the main keywords",
+    "input": {"text": "  hello world this is a test  "},
+    "expected_skills": ["text.normalize.v1", "text.title_case.v1", "text.extract_keywords.v1"],
+    "expected_output_names": ["keywords"],
+    "closed_loop": false
+  },
+  {
+    "id": "B05", "bucket": "B", "level": 2,
+    "goal": "Normalize this text and count how many words there are",
+    "input": {"text": "  one TWO   three FOUR  "},
+    "expected_skills": ["text.normalize.v1", "text.word_count.v1"],
+    "expected_output_names": ["count"],
+    "closed_loop": false
+  },
+  {
+    "id": "C01", "bucket": "C", "level": 3,
+    "goal": "Uppercase this cleaned text",
+    "input": {"text": "  hello world  "},
+    "expected_skills": ["text.normalize.v1", "text.uppercase.v1"],
+    "expected_output_names": ["uppercased"],
+    "closed_loop": true
+  },
+  {
+    "id": "C02", "bucket": "C", "level": 3,
+    "goal": "Find the minimum of these numbers",
+    "input": {"values": "5\n2\n8\n1"},
+    "expected_output": {"result": "1"},
+    "expected_skills": ["math.min.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "C03", "bucket": "C", "level": 3,
+    "goal": "Compute the median of these numbers",
+    "input": {"values": "3\n1\n4\n1\n5"},
+    "expected_output": {"result": "3"},
+    "expected_skills": ["math.median.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "C04", "bucket": "C", "level": 3,
+    "goal": "Trim whitespace from this text",
+    "input": {"text": "   hello world   "},
+    "expected_output": {"trimmed": "hello world"},
+    "expected_skills": ["text.trim.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "C05", "bucket": "C", "level": 3,
+    "goal": "Subtract the second number from the first",
+    "input": {"a": "100", "b": "37"},
+    "expected_output": {"result": "63"},
+    "expected_skills": ["math.subtract.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "C06", "bucket": "C", "level": 3,
+    "goal": "Divide the first number by the second",
+    "input": {"a": "144", "b": "12"},
+    "expected_output": {"result": "12"},
+    "expected_skills": ["math.divide.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "D01", "bucket": "D", "level": 4,
+    "goal": "Normalize this text and then uppercase the result",
+    "input": {"text": "  Hello   World  "},
+    "expected_skills": ["text.normalize.v1", "text.uppercase.v1"],
+    "expected_output_names": ["uppercased"],
+    "closed_loop": true
+  },
+  {
+    "id": "D02", "bucket": "D", "level": 4,
+    "goal": "Find both the minimum and maximum of these numbers",
+    "input": {"values": "10\n3\n7\n1\n9"},
+    "expected_skills": ["math.min.v1", "math.max.v1"],
+    "expected_output_names": ["result", "min", "max", "minimum", "maximum"],
+    "closed_loop": true
+  },
+  {
+    "id": "D03", "bucket": "D", "level": 4,
+    "goal": "Compute the mean and median of these numbers",
+    "input": {"values": "2\n4\n6\n8\n10"},
+    "expected_skills": ["math.mean.v1", "math.median.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": true
+  },
+  {
+    "id": "D04", "bucket": "D", "level": 4,
+    "goal": "Normalize this text, then count the words in it",
+    "input": {"text": "  one   TWO  three FOUR  five  "},
+    "expected_skills": ["text.normalize.v1", "text.word_count.v1"],
+    "expected_output_names": ["count"],
+    "closed_loop": false
+  },
+  {
+    "id": "E01", "bucket": "E", "level": 5,
+    "goal": "Multiply these two numbers and then add a third",
+    "input": {"a": "3", "b": "4"},
+    "expected_skills": ["math.multiply.v1", "math.add.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": false,
+    "tolerance": 0.01
+  },
+  {
+    "id": "E02", "bucket": "E", "level": 5,
+    "goal": "Compute the mean and subtract the minimum from it",
+    "input": {"values": "10\n20\n30"},
+    "expected_skills": ["math.mean.v1", "math.subtract.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": true,
+    "tolerance": 0.01
+  },
+  {
+    "id": "E03", "bucket": "E", "level": 5,
+    "goal": "Add these two numbers, then multiply the result by a factor",
+    "input": {"a": "5", "b": "3"},
+    "expected_skills": ["math.add.v1", "math.multiply.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": false,
+    "tolerance": 0.01
+  }
+]
