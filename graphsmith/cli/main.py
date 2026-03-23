@@ -754,8 +754,8 @@ def plan(
         help="Output format: text or json.",
     ),
     backend: str = typer.Option(
-        "mock", "--backend",
-        help="Planner backend: mock or llm.",
+        "auto", "--backend",
+        help="Planner backend: auto, mock, llm, or ir.",
     ),
     mock_llm: bool = typer.Option(
         False, "--mock-llm",
@@ -856,7 +856,7 @@ def plan_and_run(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Custom registry root.",
     ),
-    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock, llm, or ir."),
+    backend: str = typer.Option("auto", "--backend", help="Planner backend: auto, mock, llm, or ir."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM ops."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai."),
     model: Optional[str] = typer.Option(None, "--model", help="Model name."),
@@ -1227,7 +1227,7 @@ def eval_planner(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Registry root with published skills.",
     ),
-    backend: str = typer.Option("mock", "--backend", help="Planner backend: mock, llm (direct graph), or ir (semantic IR + compiler + reranking)."),
+    backend: str = typer.Option("auto", "--backend", help="Planner backend: auto, mock, llm (direct graph), or ir (semantic IR + compiler + reranking)."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
     model: Optional[str] = typer.Option(None, "--model", help="Model name (e.g. claude-haiku-4-5-20251001, llama-3.1-8b-instant)."),
@@ -1441,6 +1441,14 @@ def _make_planner_backend(
     """Build a planner backend from CLI flags."""
     from graphsmith.planner import LLMPlannerBackend, MockPlannerBackend
 
+    backend = _resolve_planner_backend_name(
+        backend,
+        mock_llm=mock_llm,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+    )
+
     if backend not in ("llm", "ir"):
         return MockPlannerBackend()
 
@@ -1467,6 +1475,26 @@ def _make_planner_backend(
     return LLMPlannerBackend(provider=llm)
 
 
+def _resolve_planner_backend_name(
+    backend: str,
+    *,
+    mock_llm: bool,
+    provider: str,
+    model: str | None,
+    base_url: str | None,
+) -> str:
+    """Resolve the requested backend into a concrete implementation.
+
+    `auto` preserves offline CLI ergonomics while preferring the IR path
+    whenever the caller clearly intends model-backed planning.
+    """
+    if backend != "auto":
+        return backend
+
+    if mock_llm or provider != "echo" or model is not None or base_url is not None:
+        return "ir"
+
+    return "mock"
 def _summarize_plan(glue: Any) -> str:
     """Format a GlueGraph as a human-readable plan summary."""
     lines = []
@@ -1481,8 +1509,6 @@ def _summarize_plan(glue: Any) -> str:
     if glue.effects:
         lines.append(f"  Effects: {', '.join(glue.effects)}")
     return "\n  ".join(lines)
-
-
 def _print_plan_problems(result: Any, goal: str) -> None:
     """Print plan failure/partial info to stderr."""
     typer.secho(
