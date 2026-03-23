@@ -282,6 +282,27 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
             {"input": {"values": "3\n1\n2"}, "output": {"result": "3"}},
         ],
     },
+    "median": {
+        "keywords": ["median", "middle value", "middle number"],
+        "category": "math", "family": "math_list",
+        "description": "Find the median of newline-separated numbers.",
+        "inputs": _MATH_LIST_INPUT,
+        "outputs": [{"name": "result", "type": "string"}],
+        "code_body": (
+            'parts = [p.strip() for p in str(inputs.get("values", "")).split("\\n") if p.strip()]\n'
+            '    nums = sorted(float(p) for p in parts)\n'
+            '    if not nums:\n'
+            '        from graphsmith.exceptions import OpError\n'
+            '        raise OpError("math.median: no numbers")\n'
+            '    n = len(nums)\n'
+            '    r = nums[n // 2] if n % 2 else (nums[n // 2 - 1] + nums[n // 2]) / 2\n'
+            '    return {"result": str(int(r) if r == int(r) else r)}'
+        ),
+        "examples": [
+            {"input": {"values": "3\n1\n2"}, "output": {"result": "2"}},
+            {"input": {"values": "1\n2\n3\n4"}, "output": {"result": "2.5"}},
+        ],
+    },
     # ── JSON ──────────────────────────────────────────────────────
     "get_key": {
         "keywords": ["get key", "json key", "json get", "get field", "access key"],

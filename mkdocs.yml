@@ -8,6 +8,7 @@ nav:
   - CLI Reference: cli.md
   - Skills: SKILLS.md
   - Auto Skill Creation: AUTO_SKILL_CREATION.md
+  - Closed-Loop Generation: CLOSED_LOOP_SKILL_GENERATION.md
   - Architecture: architecture.md
   - Examples: examples.md
   - Evaluation: evaluation.md

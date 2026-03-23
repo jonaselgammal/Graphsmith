@@ -40,6 +40,7 @@ class TestExtractSpec:
         ("divide numbers", "divide"),
         ("find minimum of numbers", "min"),
         ("find the maximum", "max"),
+        ("compute the median", "median"),
         ("get key from json", "get_key"),
         ("check if json has key", "has_key"),
         ("list json keys", "keys"),
@@ -124,7 +125,7 @@ class TestValidateAllTemplates:
         "starts with", "ends with", "contains substring",
         "replace text", "strip prefix", "strip suffix",
         "subtract numbers", "divide numbers",
-        "minimum of numbers", "maximum of numbers",
+        "minimum of numbers", "maximum of numbers", "median of numbers",
         "get key from json", "json has key", "json keys", "pretty print json",
     ])
     def test_template_end_to_end(self, goal: str) -> None:

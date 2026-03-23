@@ -211,6 +211,7 @@ docs/               Architecture and sprint documentation
 | `search` | Search published skills |
 | `validate` | Validate a skill package |
 | `create-skill` | Generate a new skill scaffold |
+| `solve` | Plan with closed-loop missing-skill generation |
 | `doctor` | Check system readiness |
 | `ui` | Launch local plan inspector (browser) |
 | `version` | Print version |

@@ -83,6 +83,78 @@ def create_skill(
     typer.echo(f"    4. graphsmith validate {path}")
 
 
+# ── solve (closed-loop) ───────────────────────────────────────────────
+
+
+@app.command("solve")
+def solve(
+    goal: str = typer.Argument(..., help="Natural language goal to solve."),
+    provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL."),
+    candidates: int = typer.Option(3, "--candidates", help="Number of IR candidates."),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Skip confirmation for generated skills."),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Dir for generated skill files."),
+) -> None:
+    """Solve a goal with closed-loop missing-skill generation.
+
+    If the initial plan fails due to a missing simple skill, Graphsmith
+    generates it, validates it, and replans. Bounded to one deterministic
+    single-step skill per attempt.
+    """
+    import tempfile
+    from pathlib import Path
+
+    if model is None:
+        model = "claude-haiku-4-5-20251001" if provider == "anthropic" else "llama-3.1-8b-instant"
+
+    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
+    if not skills_dir.is_dir():
+        typer.secho("ERROR: examples/skills/ not found.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    reg_dir = tempfile.mkdtemp()
+    from graphsmith.registry.local import LocalRegistry
+    from graphsmith.parser import load_skill_package
+
+    reg = LocalRegistry(reg_dir)
+    for d in sorted(skills_dir.iterdir()):
+        if d.is_dir() and (d / "skill.yaml").exists():
+            try:
+                reg.publish(load_skill_package(str(d)))
+            except Exception:
+                pass
+
+    try:
+        from graphsmith.ops.providers import create_provider
+        llm = create_provider(provider, model=model, base_url=base_url)
+    except Exception as exc:
+        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    from graphsmith.planner.ir_backend import IRPlannerBackend
+    from graphsmith.skills.closed_loop import format_closed_loop_result, run_closed_loop
+
+    backend = IRPlannerBackend(llm, candidate_count=candidates, use_decomposition=True)
+
+    def confirm(msg: str) -> bool:
+        return typer.confirm(f"  {msg}", default=False)
+
+    gen_dir = output_dir or str(Path(tempfile.mkdtemp()) / "generated_skills")
+
+    typer.echo(f"\n  Solving: {goal}\n")
+
+    result = run_closed_loop(
+        goal, backend, reg,
+        output_dir=gen_dir,
+        auto_approve=auto_approve,
+        confirm_fn=confirm,
+    )
+
+    typer.echo(format_closed_loop_result(result))
+    typer.echo("")
+
+
 # ── export-graph ──────────────────────────────────────────────────────
 
 
