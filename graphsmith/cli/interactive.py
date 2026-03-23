@@ -7,6 +7,8 @@ from typing import Any
 import typer
 
 from graphsmith.planner.ir_backend import CandidateResult, IRPlannerBackend
+
+_ARROW = " \u2192 "  # → character, extracted for Python 3.11 f-string compat
 from graphsmith.planner.models import GlueGraph, PlanResult
 from graphsmith.traces.models import RunTrace
 
@@ -52,7 +54,7 @@ def format_candidates(candidates: list[CandidateResult]) -> str:
                 lines.append(f"    error: {c.error[:80]}")
         else:
             if c.ir:
-                lines.append(f"    steps: {' \u2192 '.join(s.name for s in c.ir.steps)}")
+                lines.append(f"    steps: {_ARROW.join(s.name for s in c.ir.steps)}")
                 lines.append(f"    outputs: {', '.join(c.ir.final_outputs.keys())}")
             if c.score:
                 lines.append(f"    score: {c.score.total:.0f}")
@@ -74,7 +76,7 @@ def format_compare(candidates: list[CandidateResult]) -> str:
     for label, c in [("Selected", best), ("Alternative", alt)]:
         lines.append(f"  {label} (Candidate {c.index + 1})")
         if c.ir:
-            lines.append(f"    steps: {' \u2192 '.join(s.name for s in c.ir.steps)}")
+            lines.append(f"    steps: {_ARROW.join(s.name for s in c.ir.steps)}")
             lines.append(f"    outputs: {', '.join(c.ir.final_outputs.keys())}")
         lines.append(f"    score: {c.score.total:.0f}" if c.score else "")
         lines.append("")
