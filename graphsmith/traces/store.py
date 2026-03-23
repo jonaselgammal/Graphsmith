@@ -46,6 +46,19 @@ class TraceStore:
             return []
         return [p.stem for p in sorted(self._root.glob("*.json"))]
 
+    def list_summaries(self) -> list[dict[str, Any]]:
+        """Return compact summaries for all traces.
+
+        Invalid/unreadable trace files are skipped to keep listing robust.
+        """
+        summaries: list[dict[str, Any]] = []
+        for trace_id in self.list_ids():
+            try:
+                summaries.append(self.summarise(trace_id))
+            except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
+                continue
+        return summaries
+
     def prune(self, older_than_days: int, *, dry_run: bool = False) -> list[str]:
         """Remove traces older than *older_than_days*.
 
@@ -93,11 +106,13 @@ class TraceStore:
         return {
             "trace_id": trace_id,
             "skill_id": data.get("skill_id", "?"),
+            "started_at": started,
             "status": data.get("status", "?"),
             "duration": duration,
             "node_count": len(nodes),
             "child_trace_count": child_count,
             "op_signature": sig,
+            "input_keys": sorted(data.get("inputs_summary", {}).keys()),
             "output_keys": sorted(data.get("outputs_summary", {}).keys()),
         }
 

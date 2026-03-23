@@ -99,3 +99,23 @@ PromotionCandidate
 - No automatic publication — candidates are advisory only.
 - No confidence scoring beyond raw frequency.
 - The heuristic is intentionally simple to avoid false sophistication.
+
+## Human workflow
+
+The intended workflow is:
+
+1. Execute real plans with trace capture enabled.
+2. Inspect stored traces:
+   - `graphsmith traces-list --summary`
+   - `graphsmith traces-show <trace_id> --summary`
+3. Mine repeated patterns:
+   - `graphsmith promote-candidates`
+4. Inspect example traces attached to a candidate.
+5. Decide manually whether the repeated fragment is:
+   - a reusable skill worth promoting
+   - only a coincidental op-sequence match
+   - still too unstable or too underspecified
+
+Graphsmith does not auto-promote candidates. Promotion remains a human
+judgment step so the registry grows deliberately rather than
+optimistically.

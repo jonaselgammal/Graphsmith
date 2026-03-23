@@ -405,6 +405,31 @@ def test_traces_list_and_show(tmp_path: Path) -> None:
     assert data["skill_id"] == "test.minimal.v1"
 
 
+def test_traces_list_summary(tmp_path: Path) -> None:
+    trace_root = tmp_path / "traces"
+    write_package(
+        tmp_path / "pkg",
+        skill=minimal_skill(),
+        graph=minimal_graph(),
+        examples=minimal_examples(),
+    )
+    runner.invoke(
+        app,
+        [
+            "run", str(tmp_path / "pkg"),
+            "--input", '{"text":"hi"}',
+            "--trace-root", str(trace_root),
+        ],
+    )
+    result = runner.invoke(
+        app,
+        ["traces-list", "--trace-root", str(trace_root), "--summary"],
+    )
+    assert result.exit_code == 0
+    assert "test.minimal.v1" in result.output
+    assert "template.render" in result.output
+
+
 def test_traces_show_not_found(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
@@ -452,6 +477,32 @@ def test_promote_candidates_with_data(tmp_path: Path) -> None:
     assert len(data) >= 1
     assert data[0]["signature"] == "template.render"
     assert data[0]["frequency"] >= 2
+
+
+def test_promote_candidates_text_shows_example_traces(tmp_path: Path) -> None:
+    trace_root = tmp_path / "traces"
+    write_package(
+        tmp_path / "pkg",
+        skill=minimal_skill(),
+        graph=minimal_graph(),
+        examples=minimal_examples(),
+    )
+    for i in range(2):
+        runner.invoke(
+            app,
+            [
+                "run", str(tmp_path / "pkg"),
+                "--input", f'{{"text":"run{i}"}}',
+                "--trace-root", str(trace_root),
+            ],
+        )
+    result = runner.invoke(
+        app,
+        ["promote-candidates", "--trace-root", str(trace_root)],
+    )
+    assert result.exit_code == 0
+    assert "Inspect examples:" in result.output
+    assert "test.minimal.v1" in result.output
 
 
 # ── traces-show --summary ────────────────────────────────────────────
