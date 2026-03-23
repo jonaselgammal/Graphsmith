@@ -152,6 +152,11 @@ HELP_TEXT = """
     :graph dot         Export as DOT format
     :trace             Show last execution trace
     :inspect <node>    Show node inputs/outputs from trace
+    :refine <request>  Refine the current plan
+    :delta             Show the last parsed delta
+    :diff              Compare previous and current plan
+    :plans             List plan versions in session
+    :revert            Go back to previous plan version
     (anything else)    Plan a new goal
 """
 
@@ -178,6 +183,9 @@ class InteractiveSession:
         self.last_result: PlanResult | None = None
         self.last_goal: str = ""
         self.last_trace: RunTrace | None = None
+        # Plan versioning
+        self.plan_versions: list[tuple[str, GlueGraph]] = []  # (label, graph)
+        self.last_delta: Any = None  # RefinementRequest
 
     def run(self) -> None:
         cand_count = self.backend._candidate_count
@@ -230,6 +238,16 @@ class InteractiveSession:
             self._show_trace()
         elif name == ":inspect":
             self._inspect_node(arg)
+        elif name == ":refine":
+            self._refine(arg)
+        elif name == ":delta":
+            self._show_delta()
+        elif name == ":diff":
+            self._show_diff()
+        elif name == ":plans":
+            self._show_plans()
+        elif name == ":revert":
+            self._revert()
         else:
             typer.echo(f"  Unknown command: {name}. Type :help")
         return True
@@ -264,11 +282,15 @@ class InteractiveSession:
             typer.echo("")
             return
 
+        # Record plan version
+        label = f"v{len(self.plan_versions) + 1}: {goal[:40]}"
+        self.plan_versions.append((label, result.graph))
+
         typer.echo(format_plan_summary(result.graph))
 
         compiled = [c for c in self.backend.last_candidates if c.status == "compiled"]
         typer.echo(f"\n  ({len(compiled)} candidates compiled, "
-                   f":candidates to inspect, :trace to execute)")
+                   f":candidates to inspect, :refine to edit)")
         typer.echo("")
 
     def _show_history(self) -> None:
@@ -369,3 +391,105 @@ class InteractiveSession:
             self.backend._candidate_count = old
         else:
             self._plan_goal(self.last_goal)
+
+    # ── Refinement commands ───────────────────────────────────────
+
+    def _refine(self, request: str) -> None:
+        if not request.strip():
+            try:
+                request = input("  Refinement: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                typer.echo("")
+                return
+        if not request:
+            return
+
+        if not self.last_goal or not self.last_result or not self.last_result.graph:
+            typer.echo("  No plan to refine. Run a goal first.")
+            return
+
+        from graphsmith.planner.deltas import (
+            build_refined_goal,
+            compute_diff,
+            extract_deltas,
+            format_diff,
+        )
+
+        # Extract delta
+        refinement = extract_deltas(request, self.last_result.graph)
+        self.last_delta = refinement
+
+        # Show extracted delta
+        if refinement.deltas:
+            for d in refinement.deltas:
+                typer.echo(f"  Delta: {d.kind}({d.target})")
+        else:
+            typer.echo(f"  (treating as goal amendment)")
+        typer.echo("")
+
+        # Build refined goal and replan
+        refined_goal = build_refined_goal(self.last_goal, refinement)
+        prev_graph = self.last_result.graph
+
+        typer.echo(f"  Refined goal: {refined_goal[:80]}")
+        typer.echo("  Replanning...")
+        typer.echo("")
+
+        self._plan_goal(refined_goal)
+
+        # Show diff if both plans exist
+        if self.last_result and self.last_result.graph and prev_graph:
+            diff = compute_diff(prev_graph, self.last_result.graph)
+            typer.echo(format_diff(diff))
+            typer.echo("")
+
+    def _show_delta(self) -> None:
+        if not self.last_delta:
+            typer.echo("  No delta. Use :refine first.")
+            return
+        typer.echo("  Last refinement:")
+        typer.echo(f"    Request: {self.last_delta.raw_request}")
+        for d in self.last_delta.deltas:
+            typer.echo(f"    {d.kind}: {d.target}")
+            if d.replacement:
+                typer.echo(f"      -> {d.replacement}")
+        typer.echo("")
+
+    def _show_diff(self) -> None:
+        if len(self.plan_versions) < 2:
+            typer.echo("  Need at least 2 plan versions for diff.")
+            return
+        from graphsmith.planner.deltas import compute_diff, format_diff
+        _, prev = self.plan_versions[-2]
+        _, curr = self.plan_versions[-1]
+        diff = compute_diff(prev, curr)
+        typer.echo(f"\n  {format_plan_summary(prev)}\n")
+        typer.echo("  ----->")
+        typer.echo(f"\n  {format_plan_summary(curr)}\n")
+        typer.echo(format_diff(diff))
+        typer.echo("")
+
+    def _show_plans(self) -> None:
+        if not self.plan_versions:
+            typer.echo("  No plan versions yet.")
+            return
+        typer.echo("  Plan versions:")
+        for i, (label, graph) in enumerate(self.plan_versions):
+            current = " (current)" if i == len(self.plan_versions) - 1 else ""
+            chain = _ARROW.join(n.id for n in graph.graph.nodes)
+            typer.echo(f"    {i+1}. {label}{current}")
+            typer.echo(f"       {chain}")
+        typer.echo("")
+
+    def _revert(self) -> None:
+        if len(self.plan_versions) < 2:
+            typer.echo("  No previous version to revert to.")
+            return
+        self.plan_versions.pop()
+        label, graph = self.plan_versions[-1]
+        # Reconstruct last_result
+        from graphsmith.planner.models import PlanResult
+        self.last_result = PlanResult(status="success", graph=graph)
+        typer.echo(f"  Reverted to: {label}")
+        typer.echo(format_plan_summary(graph))
+        typer.echo("")

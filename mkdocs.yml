@@ -14,6 +14,7 @@ nav:
   - Evaluation: evaluation.md
   - Capability Ladder: CAPABILITY_LADDER_RESULTS.md
   - Live Campaign: LIVE_CAPABILITY_CAMPAIGN_RESULTS.md
+  - Plan Refinement: PLAN_REFINEMENT.md
   - Debugging: debugging.md
 
 docs_dir: docs
