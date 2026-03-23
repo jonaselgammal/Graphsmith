@@ -15,7 +15,19 @@ cp .env.example .env
 # Edit .env with your keys
 ```
 
-## 1. Run eval with Claude Haiku (recommended)
+## 1. Canonical benchmark eval
+
+This is the default regression check for planner changes and release
+readiness. It uses the benchmark goal set in `evaluation/goals` and the
+recommended IR configuration.
+
+```bash
+scripts/eval_canonical.sh \
+  --provider anthropic \
+  --model claude-haiku-4-5-20251001
+```
+
+## 2. Run eval with Claude Haiku (full three-set sweep)
 
 ```bash
 REG=$(mktemp -d)
@@ -39,7 +51,7 @@ graphsmith eval-planner --goals evaluation/challenge_goals --registry "$REG" \
 
 Expected: 36/36 (100%).
 
-## 2. Run eval with Llama 3.1 8B (Groq)
+## 3. Run eval with Llama 3.1 8B (Groq)
 
 ```bash
 export GRAPHSMITH_GROQ_API_KEY=gsk_...
@@ -52,7 +64,7 @@ graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
 
 Expected: ~86-94% (varies by run).
 
-## 3. Run stability eval (repeated runs)
+## 4. Run stability eval (repeated runs)
 
 ```bash
 GS_EVAL_DELAY=5 scripts/run_stability_eval.sh 3 \
@@ -62,7 +74,7 @@ GS_EVAL_DELAY=5 scripts/run_stability_eval.sh 3 \
 python scripts/analyze_stability.py /tmp/gs_stability_*/
 ```
 
-## 4. Collect candidate-level data
+## 5. Collect candidate-level data
 
 ```bash
 python scripts/collect_candidate_data.py --runs 1 \
@@ -70,7 +82,7 @@ python scripts/collect_candidate_data.py --runs 1 \
   --provider anthropic --model claude-haiku-4-5-20251001 --delay 2
 ```
 
-## 5. Compare planners (direct vs IR)
+## 6. Compare planners (direct vs IR)
 
 ```bash
 GS_EVAL_DELAY=3 scripts/eval_compare_planners.sh \
@@ -93,7 +105,7 @@ python scripts/compare_planners.py \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--backend` | `mock` | `mock`, `llm` (direct graph), or `ir` (IR pipeline) |
+| `--backend` | `auto` | `auto`, `mock`, `llm` (direct graph), or `ir` (IR pipeline) |
 | `--ir-candidates` | `1` | Number of IR candidates for reranking |
 | `--decompose` | off | Enable semantic decomposition stage |
 | `--delay` | `0` | Seconds between goals (rate limit protection) |

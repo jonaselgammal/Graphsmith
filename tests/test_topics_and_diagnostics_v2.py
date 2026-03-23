@@ -144,6 +144,8 @@ class TestScripts:
         "eval_default_safe.sh",
         "eval_compare_safe.sh",
         "eval_holdout_modes_safe.sh",
+        "eval_canonical.sh",
+        "release_smoke.sh",
     ])
     def test_exists_and_executable(self, script: str) -> None:
         import os
@@ -159,3 +161,10 @@ class TestScripts:
         for script in ["eval_compare_safe.sh", "eval_holdout_modes_safe.sh"]:
             content = (SCRIPTS_DIR / script).read_text()
             assert "GS_EVAL_DELAY:-3" in content
+
+    def test_canonical_eval_uses_ir_benchmark_defaults(self) -> None:
+        content = (SCRIPTS_DIR / "eval_canonical.sh").read_text()
+        assert "evaluation/goals" in content
+        assert "--backend ir" in content
+        assert "--ir-candidates 3" in content
+        assert "--decompose" in content
