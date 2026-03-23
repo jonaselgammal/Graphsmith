@@ -311,7 +311,7 @@ class TestFormatClosedLoopResult:
             initial_status="failure", detected_missing=True,
             diagnosis_reason="missing math.median.v1",
             validation_pass=True, examples_total=2, examples_passed=2,
-            replan_status="success", success=True,
+            replan_status="success", stopped_reason="replan_succeeded", success=True,
         )
         text = format_closed_loop_result(r)
         assert "SUCCESS" in text

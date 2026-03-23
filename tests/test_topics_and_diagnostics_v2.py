@@ -146,6 +146,7 @@ class TestScripts:
         "eval_holdout_modes_safe.sh",
         "eval_canonical.sh",
         "release_smoke.sh",
+        "run_autogen_battery.py",
     ])
     def test_exists_and_executable(self, script: str) -> None:
         import os
@@ -168,3 +169,7 @@ class TestScripts:
         assert "--backend ir" in content
         assert "--ir-candidates 3" in content
         assert "--decompose" in content
+
+    def test_autogen_battery_references_manifest(self) -> None:
+        content = (SCRIPTS_DIR / "run_autogen_battery.py").read_text()
+        assert "autogen_prompt_battery.json" in content
