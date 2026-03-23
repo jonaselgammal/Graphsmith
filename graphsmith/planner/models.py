@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from graphsmith.models.common import IOField
 from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+from graphsmith.planner.candidates import RetrievalDiagnostics
 from graphsmith.registry.index import IndexEntry
 
 
@@ -67,3 +68,4 @@ class PlanResult(BaseModel):
     holes: list[UnresolvedHole] = Field(default_factory=list)
     reasoning: str = ""
     candidates_considered: list[str] = Field(default_factory=list)
+    retrieval: RetrievalDiagnostics | None = None

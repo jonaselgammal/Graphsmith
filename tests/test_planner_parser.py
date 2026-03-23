@@ -345,3 +345,21 @@ class TestCLIPlannerBackend:
         ])
         assert result.exit_code == 1
         assert "API key" in result.output or "FAIL" in result.output
+
+    def test_plan_show_retrieval_in_text_output(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+        from graphsmith.cli.main import app
+        runner = CliRunner()
+        reg_root = tmp_path / "reg"
+        runner.invoke(app, [
+            "publish", str(EXAMPLE_DIR / "text.summarize.v1"),
+            "--registry", str(reg_root),
+        ])
+        result = runner.invoke(app, [
+            "plan", "summarize text",
+            "--registry", str(reg_root),
+            "--show-retrieval",
+        ])
+        assert result.exit_code == 0
+        assert "Retrieval [ranked]" in result.output
+        assert "text.summarize.v1" in result.output

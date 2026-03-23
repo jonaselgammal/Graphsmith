@@ -115,6 +115,30 @@ class TestRankedRecallMode:
         assert score_stem >= score_no_stem
 
 
+class TestContractAwareRanking:
+    def test_output_names_increase_relevance(self) -> None:
+        entry = IndexEntry(
+            id="x.v1",
+            name="X",
+            version="1.0.0",
+            description="Transforms text",
+            output_names=["keywords"],
+        )
+        score = _relevance_score(entry, ["keywords"], use_stems=False)
+        assert score >= 3
+
+    def test_input_names_increase_relevance(self) -> None:
+        entry = IndexEntry(
+            id="x.v1",
+            name="X",
+            version="1.0.0",
+            description="Performs an operation",
+            input_names=["raw_json"],
+        )
+        score = _relevance_score(entry, ["json"], use_stems=False)
+        assert score >= 2
+
+
 class TestNoChallengeRegression:
     """Ranked mode should still filter distractors for challenge goals."""
 

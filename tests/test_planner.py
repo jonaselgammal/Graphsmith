@@ -208,6 +208,8 @@ class TestComposer:
         assert result.status == "success"
         assert result.graph is not None
         assert len(result.candidates_considered) > 0
+        assert result.retrieval is not None
+        assert result.retrieval.goal == "summarize text"
 
     def test_compose_empty_registry(self, reg: LocalRegistry) -> None:
         result = compose_plan(
@@ -217,6 +219,7 @@ class TestComposer:
         )
         assert result.status == "failure"
         assert result.graph is None
+        assert result.retrieval is not None
 
     def test_compose_validates_graph(
         self, reg_with_skills: LocalRegistry
