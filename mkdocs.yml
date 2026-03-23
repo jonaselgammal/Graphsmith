@@ -12,6 +12,7 @@ nav:
   - Architecture: architecture.md
   - Examples: examples.md
   - Evaluation: evaluation.md
+  - Capability Ladder: CAPABILITY_LADDER_RESULTS.md
   - Debugging: debugging.md
 
 docs_dir: docs

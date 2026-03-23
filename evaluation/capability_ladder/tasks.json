@@ -1,0 +1,184 @@
+[
+  {
+    "id": "L1-01",
+    "level": 1,
+    "goal": "Normalize this text",
+    "description": "Simple single-skill text normalization",
+    "input": {"text": "  Hello   WORLD  "},
+    "expected_output": {"normalized": "hello world"},
+    "expected_skills": ["text.normalize.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "L1-02",
+    "level": 1,
+    "goal": "Count the words in this text",
+    "description": "Simple word count",
+    "input": {"text": "one two three four five"},
+    "expected_output": {"count": "5"},
+    "expected_skills": ["text.word_count.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "L1-03",
+    "level": 1,
+    "goal": "Add these two numbers",
+    "description": "Simple math addition",
+    "input": {"a": "7", "b": "3"},
+    "expected_output": {"result": "10"},
+    "expected_skills": ["math.add.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "L1-04",
+    "level": 1,
+    "goal": "Compute the mean of these numbers",
+    "description": "Mean of number list",
+    "input": {"values": "10\n20\n30"},
+    "expected_output": {"result": "20"},
+    "expected_skills": ["math.mean.v1"],
+    "closed_loop": false
+  },
+  {
+    "id": "L2-01",
+    "level": 2,
+    "goal": "Normalize this text and extract keywords",
+    "description": "Two-skill text pipeline",
+    "input": {"text": "  AI agents ARE transforming SOFTWARE  "},
+    "expected_skills": ["text.normalize.v1", "text.extract_keywords.v1"],
+    "expected_output_names": ["normalized", "keywords"],
+    "closed_loop": false
+  },
+  {
+    "id": "L2-02",
+    "level": 2,
+    "goal": "Normalize text and count the words",
+    "description": "Normalize then word count composition",
+    "input": {"text": "  hello   world   foo  "},
+    "expected_skills": ["text.normalize.v1", "text.word_count.v1"],
+    "expected_output_names": ["count"],
+    "closed_loop": false
+  },
+  {
+    "id": "L2-03",
+    "level": 2,
+    "goal": "Normalize this text, then capitalize each word",
+    "description": "Normalize + title case",
+    "input": {"text": "  hello WORLD foo  "},
+    "expected_skills": ["text.normalize.v1", "text.title_case.v1"],
+    "expected_output_names": ["titled"],
+    "closed_loop": false
+  },
+  {
+    "id": "L2-04",
+    "level": 2,
+    "goal": "Multiply these numbers and then add a third",
+    "description": "Two-step math composition",
+    "input": {"a": "3", "b": "4"},
+    "expected_skills": ["math.multiply.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": false
+  },
+  {
+    "id": "L3-01",
+    "level": 3,
+    "goal": "Compute the median of these numbers",
+    "description": "Requires generated math.median skill",
+    "input": {"values": "3\n1\n2"},
+    "expected_output": {"result": "2"},
+    "expected_skills": ["math.median.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "L3-02",
+    "level": 3,
+    "goal": "Uppercase this text",
+    "description": "Requires generated text.uppercase skill",
+    "input": {"text": "hello world"},
+    "expected_output": {"uppercased": "HELLO WORLD"},
+    "expected_skills": ["text.uppercase.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "L3-03",
+    "level": 3,
+    "goal": "Trim whitespace from this text",
+    "description": "Requires generated text.trim skill",
+    "input": {"text": "  hello  "},
+    "expected_output": {"trimmed": "hello"},
+    "expected_skills": ["text.trim.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "L3-04",
+    "level": 3,
+    "goal": "Find the minimum of these numbers",
+    "description": "Requires generated math.min skill",
+    "input": {"values": "5\n2\n8\n1"},
+    "expected_output": {"result": "1"},
+    "expected_skills": ["math.min.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "L3-05",
+    "level": 3,
+    "goal": "Find the maximum of these numbers",
+    "description": "Requires generated math.max skill",
+    "input": {"values": "5\n2\n8\n1"},
+    "expected_output": {"result": "8"},
+    "expected_skills": ["math.max.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "L3-06",
+    "level": 3,
+    "goal": "Subtract these two numbers",
+    "description": "Requires generated math.subtract skill",
+    "input": {"a": "10", "b": "3"},
+    "expected_output": {"result": "7"},
+    "expected_skills": ["math.subtract.v1"],
+    "closed_loop": true
+  },
+  {
+    "id": "L4-01",
+    "level": 4,
+    "goal": "Normalize this text and then uppercase it",
+    "description": "Multi-step with generated uppercase skill",
+    "input": {"text": "  Hello   World  "},
+    "expected_skills": ["text.normalize.v1", "text.uppercase.v1"],
+    "expected_output_names": ["uppercased"],
+    "closed_loop": true
+  },
+  {
+    "id": "L4-02",
+    "level": 4,
+    "goal": "Compute the median and the mean of these numbers",
+    "description": "Two math outputs, one generated",
+    "input": {"values": "1\n2\n3\n4\n5"},
+    "expected_skills": ["math.mean.v1", "math.median.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": true
+  },
+  {
+    "id": "L5-01",
+    "level": 5,
+    "goal": "Multiply these two numbers and then divide by a third",
+    "description": "Three-step numeric pipeline",
+    "input": {"a": "6", "b": "7"},
+    "expected_skills": ["math.multiply.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": true,
+    "tolerance": 0.01
+  },
+  {
+    "id": "L5-02",
+    "level": 5,
+    "goal": "Compute the mean and then subtract the minimum",
+    "description": "Aggregate then transform",
+    "input": {"values": "10\n20\n30"},
+    "expected_skills": ["math.mean.v1"],
+    "expected_output_names": ["result"],
+    "closed_loop": true,
+    "tolerance": 0.01
+  }
+]
