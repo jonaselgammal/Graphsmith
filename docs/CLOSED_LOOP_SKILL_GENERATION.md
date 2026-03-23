@@ -79,6 +79,20 @@ If any condition is not met, no generation is attempted.
 - Out-of-scope requests are refused
 - If validation or examples fail, the loop aborts
 
+## Why a loop stops
+
+Closed-loop generation is intentionally bounded, so every exit is
+explicit. Common stop reasons are:
+
+- initial plan already succeeded
+- no missing skill was detected
+- generated skill failed validation
+- generated skill failed example tests
+- waiting for user confirmation
+- user declined confirmation
+- publish failed
+- replan failed after publication
+
 ## Limitations
 
 - Detection relies on keyword matching, not deep semantic analysis

@@ -580,11 +580,13 @@ def validate_and_test(spec: SkillSpec, skill_dir: Path) -> dict[str, Any]:
     result: dict[str, Any] = {
         "skill_id": spec.skill_id, "validation": "FAIL",
         "examples_total": 0, "examples_passed": 0, "errors": [],
+        "failure_stage": "", "passed": False,
     }
 
     try:
         register_generated_op(spec)
     except Exception as exc:
+        result["failure_stage"] = "registration"
         result["errors"].append(f"Op registration failed: {exc}")
         return result
 
@@ -593,6 +595,7 @@ def validate_and_test(spec: SkillSpec, skill_dir: Path) -> dict[str, Any]:
         validate_skill_package(pkg)
         result["validation"] = "PASS"
     except (ValidationError, Exception) as exc:
+        result["failure_stage"] = "validation"
         result["errors"].append(f"Validation: {exc}")
         return result
 
@@ -603,10 +606,16 @@ def validate_and_test(spec: SkillSpec, skill_dir: Path) -> dict[str, Any]:
             if output == ex["output"]:
                 result["examples_passed"] += 1
             else:
+                result["failure_stage"] = "examples"
                 result["errors"].append(f"Example {i+1}: expected {ex['output']}, got {output}")
         except Exception as exc:
+            result["failure_stage"] = "examples"
             result["errors"].append(f"Example {i+1}: {exc}")
 
+    result["passed"] = (
+        result["validation"] == "PASS"
+        and result["examples_passed"] == result["examples_total"]
+    )
     return result
 
 
@@ -615,6 +624,8 @@ def format_result(result: dict[str, Any], skill_dir: Path) -> str:
     lines = [f"  Created: {skill_dir}", f"  Validation: {result['validation']}"]
     if result["examples_total"] > 0:
         lines.append(f"  Examples: {result['examples_passed']}/{result['examples_total']} PASS")
+    if result.get("failure_stage"):
+        lines.append(f"  Failure stage: {result['failure_stage']}")
     if result["errors"]:
         lines.append("  Issues:")
         for err in result["errors"][:5]:

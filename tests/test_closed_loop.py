@@ -163,6 +163,7 @@ class TestClosedLoopOrchestration:
         assert result.validation_pass
         assert result.examples_passed == result.examples_total
         assert result.replan_status == "success"
+        assert result.stopped_reason == "replan_succeeded"
         assert result.success
 
     def test_user_decline_stops_loop(self) -> None:
@@ -196,6 +197,7 @@ class TestClosedLoopOrchestration:
 
         assert result.detected_missing
         assert result.validation_pass
+        assert result.stopped_reason == "confirmation_declined"
         assert not result.success  # user declined, no replan
         assert result.replan_status == ""
 
@@ -230,6 +232,7 @@ class TestClosedLoopOrchestration:
 
         assert result.detected_missing
         assert result.validation_pass
+        assert result.stopped_reason == "awaiting_confirmation"
         assert not result.success
 
     def test_unrecognized_goal_no_generation(self) -> None:
@@ -263,6 +266,7 @@ class TestClosedLoopOrchestration:
 
         assert not result.detected_missing
         assert result.generated_spec is None
+        assert result.stopped_reason == "missing_skill_not_detected"
         assert not result.success
 
     def test_initial_success_skips_loop(self) -> None:
@@ -293,6 +297,7 @@ class TestClosedLoopOrchestration:
 
         reg, _ = self._make_registry_without()
         result = run_closed_loop("trim text", SuccessBackend(), reg, auto_approve=True)
+        assert result.stopped_reason == "initial_plan_succeeded"
         assert result.success
         assert not result.detected_missing
 
@@ -312,6 +317,7 @@ class TestFormatClosedLoopResult:
         assert "SUCCESS" in text
         assert "failure" in text
         assert "success" in text
+        assert "Stopped:" in text
 
     def test_format_failure(self) -> None:
         r = ClosedLoopResult(
@@ -320,3 +326,20 @@ class TestFormatClosedLoopResult:
         )
         text = format_closed_loop_result(r)
         assert "FAILED" in text
+
+    def test_format_includes_failure_stage(self) -> None:
+        r = ClosedLoopResult(
+            initial_status="failure",
+            detected_missing=True,
+            generated_spec=extract_spec("uppercase text"),
+            validation_pass=False,
+            examples_total=0,
+            examples_passed=0,
+            generation_failure_stage="validation",
+            generation_errors=["Validation: bad package"],
+            stopped_reason="generated_skill_validation_failed",
+            success=False,
+        )
+        text = format_closed_loop_result(r)
+        assert "Failure stage: validation" in text
+        assert "generated_skill_validation_failed" in text

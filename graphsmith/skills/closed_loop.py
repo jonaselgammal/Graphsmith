@@ -103,6 +103,7 @@ class ClosedLoopResult(BaseModel):
     validation_pass: bool = False
     examples_total: int = 0
     examples_passed: int = 0
+    generation_failure_stage: str = ""
     generation_errors: list[str] = Field(default_factory=list)
 
     # Replan
@@ -110,6 +111,7 @@ class ClosedLoopResult(BaseModel):
     replan_plan: GlueGraph | None = None
 
     # Overall
+    stopped_reason: str = ""
     success: bool = False
 
 
@@ -148,6 +150,7 @@ def run_closed_loop(
     result.initial_plan = plan_result.graph
 
     if plan_result.status == "success" and plan_result.graph is not None:
+        result.stopped_reason = "initial_plan_succeeded"
         result.success = True
         return result
 
@@ -157,12 +160,14 @@ def run_closed_loop(
     result.diagnosis_reason = diagnosis.reason
 
     if not diagnosis.is_missing:
+        result.stopped_reason = "missing_skill_not_detected"
         return result
 
     # ── Step 3: Generate candidate skill ──────────────────────────
     try:
         spec = extract_spec(diagnosis.capability_hint)
     except AutogenError as exc:
+        result.stopped_reason = "spec_extraction_failed"
         result.generation_errors.append(str(exc))
         return result
 
@@ -179,14 +184,20 @@ def run_closed_loop(
     result.validation_pass = val_result["validation"] == "PASS"
     result.examples_total = val_result["examples_total"]
     result.examples_passed = val_result["examples_passed"]
+    result.generation_failure_stage = val_result.get("failure_stage", "")
     result.generation_errors = val_result["errors"]
 
-    if not result.validation_pass or result.examples_passed < result.examples_total:
+    if not result.validation_pass:
+        result.stopped_reason = "generated_skill_validation_failed"
+        return result
+    if result.examples_passed < result.examples_total:
+        result.stopped_reason = "generated_skill_examples_failed"
         return result
 
     # ── Step 5: Confirm with user ─────────────────────────────────
     if not auto_approve:
         if confirm_fn is None:
+            result.stopped_reason = "awaiting_confirmation"
             return result  # no way to confirm → return for caller to handle
         summary = (
             f"Generated skill {spec.skill_id} "
@@ -194,12 +205,14 @@ def run_closed_loop(
             f"Replan with this skill?"
         )
         if not confirm_fn(summary):
+            result.stopped_reason = "confirmation_declined"
             return result
 
     # ── Step 6: Publish to registry + replan ──────────────────────
     try:
         registry.publish(str(skill_dir))
     except Exception as exc:
+        result.stopped_reason = "publish_failed"
         result.generation_errors.append(f"Publish failed: {exc}")
         return result
 
@@ -210,6 +223,7 @@ def run_closed_loop(
     result.replan_status = replan_result.status
     result.replan_plan = replan_result.graph
     result.success = replan_result.status == "success" and replan_result.graph is not None
+    result.stopped_reason = "replan_succeeded" if result.success else "replan_failed"
 
     return result
 
@@ -240,6 +254,8 @@ def format_closed_loop_result(result: ClosedLoopResult) -> str:
         lines.append(f"  Generated: {spec.skill_id} ({spec.family})")
         lines.append(f"  Validation: {'PASS' if result.validation_pass else 'FAIL'}")
         lines.append(f"  Examples: {result.examples_passed}/{result.examples_total} PASS")
+        if result.generation_failure_stage:
+            lines.append(f"  Failure stage: {result.generation_failure_stage}")
         if result.generation_dir:
             lines.append(f"  Files: {result.generation_dir}")
 
@@ -262,6 +278,9 @@ def format_closed_loop_result(result: ClosedLoopResult) -> str:
         lines.append("  Errors:")
         for err in result.generation_errors[:3]:
             lines.append(f"    - {err[:80]}")
+
+    if result.stopped_reason:
+        lines.append(f"  Stopped: {result.stopped_reason}")
 
     # Overall
     status = "\u2714 SUCCESS" if result.success else "\u2716 FAILED"

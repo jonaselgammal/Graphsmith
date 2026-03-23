@@ -90,3 +90,15 @@ graphsmith validate examples/skills/text.uppercase.v1
 # Publish when satisfied
 graphsmith publish examples/skills/text.uppercase.v1 --registry "$REG"
 ```
+
+## Failure stages
+
+When generation does not fully pass, Graphsmith now reports the stage
+that failed:
+
+- `registration` — runtime op registration failed
+- `validation` — generated package failed Graphsmith validation
+- `examples` — package validated, but one or more examples failed
+
+This is intended to make battle-testing easier: failures are still
+bounded, but easier to classify and debug.

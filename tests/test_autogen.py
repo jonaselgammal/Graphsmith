@@ -165,9 +165,54 @@ class TestFormatResult:
     def test_format_fail(self) -> None:
         result = {"skill_id": "test", "validation": "FAIL",
                   "examples_total": 0, "examples_passed": 0,
-                  "errors": ["something broke"]}
+                  "errors": ["something broke"], "failure_stage": "validation"}
         text = format_result(result, Path("/tmp/test"))
         assert "FAIL" in text
+        assert "Failure stage: validation" in text
+
+
+class TestValidationStages:
+    def test_registration_failure_stage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from graphsmith.skills import autogen as mod
+
+        def fail_register(spec: SkillSpec) -> None:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(mod, "register_generated_op", fail_register)
+        spec = extract_spec("uppercase text")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = generate_skill_files(spec, tmpdir)
+            result = validate_and_test(spec, path)
+        assert result["failure_stage"] == "registration"
+        assert not result["passed"]
+
+    def test_validation_failure_stage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import graphsmith.validator as validator_mod
+
+        def fail_validate(pkg) -> None:
+            raise RuntimeError("bad package")
+
+        monkeypatch.setattr(validator_mod, "validate_skill_package", fail_validate)
+        spec = extract_spec("uppercase text")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = generate_skill_files(spec, tmpdir)
+            result = validate_and_test(spec, path)
+        assert result["failure_stage"] == "validation"
+        assert not result["passed"]
+
+    def test_examples_failure_stage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import graphsmith.ops.registry as registry_mod
+
+        def wrong_output(op_name, config, inputs, **kwargs):
+            return {"uppercased": "WRONG"}
+
+        monkeypatch.setattr(registry_mod, "execute_op", wrong_output)
+        spec = extract_spec("uppercase text")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = generate_skill_files(spec, tmpdir)
+            result = validate_and_test(spec, path)
+        assert result["failure_stage"] == "examples"
+        assert not result["passed"]
 
 
 # ── No regression ────────────────────────────────────────────────
