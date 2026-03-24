@@ -82,7 +82,7 @@ def _repair_loop_block(
 
         updated = block
         if not updated.final_outputs:
-            desired_ports = _infer_block_output_ports(ir, block_name)
+            desired_ports = infer_block_output_ports(ir, block_name)
             if desired_ports and updated.steps:
                 terminal_step = updated.steps[-1].name
                 updated = updated.model_copy(
@@ -133,7 +133,7 @@ def _repair_branch_block(
             continue
 
         updated = block
-        desired_ports = _infer_block_output_ports(ir, block_name)
+        desired_ports = infer_block_output_ports(ir, block_name)
 
         then_outputs = dict(updated.then_outputs)
         else_outputs = dict(updated.else_outputs)
@@ -172,7 +172,7 @@ def _repair_branch_block(
     return ir.model_copy(update={"blocks": updated_blocks}), actions
 
 
-def _infer_block_output_ports(ir: PlanningIR, block_name: str) -> list[str]:
+def infer_block_output_ports(ir: PlanningIR, block_name: str) -> list[str]:
     ports: list[str] = []
     seen: set[str] = set()
 

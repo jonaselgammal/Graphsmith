@@ -986,6 +986,145 @@ class TestIRBackend:
         assert node.op == "parallel.map"
         assert node.config["item_inputs"] == ["text"]
 
+    def test_backend_regenerates_invalid_loop_block_locally(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        first_ir = json.dumps({
+            "inputs": [{"name": "items", "type": "array<string>"}],
+            "steps": [
+                {
+                    "name": "prepare",
+                    "skill_id": "identity",
+                    "sources": {"value": {"step": "input", "port": "items"}},
+                }
+            ],
+            "blocks": [
+                {
+                    "name": "normalize_each",
+                    "kind": "loop",
+                    "inputs": {"text": {"binding": "item"}},
+                    "steps": [
+                        {
+                            "name": "normalize",
+                            "skill_id": "text.normalize.v1",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                        }
+                    ],
+                    "final_outputs": {"normalized": {"step": "normalize", "port": "normalized"}},
+                }
+            ],
+            "final_outputs": {"normalized": {"step": "normalize_each", "port": "normalized"}},
+            "effects": ["pure"],
+        })
+        repaired_block = json.dumps({
+            "block": {
+                "name": "normalize_each",
+                "kind": "loop",
+                "collection": {"step": "prepare", "port": "value"},
+                "inputs": {"text": {"binding": "item"}},
+                "steps": [
+                    {
+                        "name": "normalize",
+                        "skill_id": "text.normalize.v1",
+                        "sources": {"text": {"step": "input", "port": "text"}},
+                    }
+                ],
+                "final_outputs": {"normalized": {"step": "normalize", "port": "normalized"}},
+                "max_items": 100,
+            }
+        })
+
+        class FixedProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                self.calls += 1
+                return first_ir if self.calls == 1 else repaired_block
+
+        provider = FixedProvider()
+        backend = IRPlannerBackend(provider)  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="normalize each item", candidates=[]))
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert provider.calls == 2
+        assert any("regenerated loop block locally" in action for action in result.repair_actions)
+        ids = {node.id for node in result.graph.graph.nodes}
+        assert "prepare" in ids
+        assert "normalize_each" in ids
+
+    def test_backend_regenerates_invalid_branch_block_locally(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        first_ir = json.dumps({
+            "inputs": [{"name": "text", "type": "string"}, {"name": "enabled", "type": "boolean"}],
+            "steps": [],
+            "blocks": [
+                {
+                    "name": "format_branch",
+                    "kind": "branch",
+                    "condition": {"step": "input", "port": "enabled"},
+                    "inputs": {"text": {"step": "input", "port": "text"}},
+                    "then_steps": [
+                        {
+                            "name": "then_render",
+                            "skill_id": "template.render",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                            "config": {"template": "then:{{text}}"},
+                        }
+                    ],
+                    "then_outputs": {"rendered": {"step": "then_render", "port": "rendered"}},
+                }
+            ],
+            "final_outputs": {"rendered": {"step": "format_branch", "port": "rendered"}},
+            "effects": ["pure"],
+        })
+        repaired_block = json.dumps({
+            "block": {
+                "name": "format_branch",
+                "kind": "branch",
+                "condition": {"step": "input", "port": "enabled"},
+                "inputs": {"text": {"step": "input", "port": "text"}},
+                "then_steps": [
+                    {
+                        "name": "then_render",
+                        "skill_id": "template.render",
+                        "sources": {"text": {"step": "input", "port": "text"}},
+                        "config": {"template": "then:{{text}}"},
+                    }
+                ],
+                "else_steps": [
+                    {
+                        "name": "else_render",
+                        "skill_id": "template.render",
+                        "sources": {"text": {"step": "input", "port": "text"}},
+                        "config": {"template": "else:{{text}}"},
+                    }
+                ],
+                "then_outputs": {"rendered": {"step": "then_render", "port": "rendered"}},
+                "else_outputs": {"rendered": {"step": "else_render", "port": "rendered"}}
+            }
+        })
+
+        class FixedProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                self.calls += 1
+                return first_ir if self.calls == 1 else repaired_block
+
+        provider = FixedProvider()
+        backend = IRPlannerBackend(provider)  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="conditionally format", candidates=[]))
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert provider.calls == 2
+        assert any("regenerated branch block locally" in action for action in result.repair_actions)
+        assert result.graph.graph.outputs["rendered"] == "format_branch_merge_rendered.result"
+
 
 class TestIRRepair:
     def test_repair_infers_branch_outputs_from_parent_refs(self) -> None:

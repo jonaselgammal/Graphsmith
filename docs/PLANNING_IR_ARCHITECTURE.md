@@ -131,6 +131,7 @@ Drop-in replacement for `LLMPlannerBackend` — same interface, different pipeli
 
 Graphsmith now includes a bounded multi-layer repair path:
 - IR-local repair before final compiler failure
+- block-local LLM regeneration when a single branch/loop block is still invalid
 - graph-level contract normalization before validation/execution
 - one runtime-informed graph patch retry on specific execution failures
 
@@ -196,11 +197,36 @@ Current scope:
 
 This is not yet a general repair loop. It still does not:
 - fix arbitrary bad dataflow
-- synthesize missing branch or loop bodies
+- synthesize entirely new missing capabilities
 - recover from unknown skills or broad type mismatches
 - classify and patch arbitrary regions from full traces
 - guarantee user-intended output naming in the general case when the plan is
   semantically close but the naming ambiguity is not deterministic
+
+### 4. Block-local regeneration
+
+When deterministic IR-local repair is not enough and the compiler error is
+still scoped to a single `branch` or `loop` block, Graphsmith now performs one
+bounded LLM retry against just that block.
+
+Current behavior:
+- preserve the surrounding IR unchanged
+- preserve the failing block's `name` and `kind`
+- pass the goal, compiler error, current block JSON, graph inputs, top-level
+  step names, available skills, and required exposed output names into a repair
+  prompt
+- require the model to return only `{"block": {...}}`
+- splice the repaired block back into the original IR and retry compilation once
+
+This matters because it keeps the "zoom into one region and patch it" property
+without falling back to whole-plan regeneration.
+
+Current limitations:
+- only one retry
+- only for block-local compiler failures that still carry a `block_name`
+- no runtime-trace-guided region regeneration yet
+- no nested-region regeneration
+- no skill synthesis if the repaired block still lacks capability
 
 ## Output-contract repair
 
@@ -222,8 +248,9 @@ This is intentionally narrow and structural:
 
 ## Future: structural repair loop
 
-The next layer is a real structural repair loop:
-- classify compiler/runtime failures by region
-- patch one branch or loop body instead of replanning the whole graph
-- optionally use LLM-guided edits when deterministic repair is insufficient
-- feed trace evidence back into repair decisions
+The next layer is a fuller structural repair loop:
+- classify compiler and runtime failures by region and failure type
+- use trace evidence to regenerate a failing loop body or branch arm
+- patch nested regions, not just top-level blocks
+- escalate from local repair to skill synthesis only when local composition
+  remains insufficient
