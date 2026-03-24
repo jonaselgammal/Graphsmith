@@ -10,10 +10,13 @@ from typer.testing import CliRunner
 
 from graphsmith.cli.main import app
 from graphsmith.exceptions import ExecutionError, PlannerError
+from graphsmith.models.common import IOField
+from graphsmith.models.graph import GraphBody, GraphNode
 from graphsmith.ops.llm_provider import EchoLLMProvider
 from graphsmith.planner import (
     GlueGraph,
     MockPlannerBackend,
+    PlanResult,
     compose_plan,
     load_plan,
     run_glue_graph,
@@ -93,7 +96,6 @@ class TestRunGlueGraph:
 
     def test_partial_plan_not_executed(self, reg: LocalRegistry) -> None:
         """Compose a plan with desired_outputs that can't be met → partial."""
-        from graphsmith.models.common import IOField
         result = compose_plan(
             "summarize text", reg, MockPlannerBackend(),
             desired_outputs=[IOField(name="nonexistent", type="string")],
@@ -101,6 +103,189 @@ class TestRunGlueGraph:
         assert result.status == "partial"
         # run_glue_graph only takes a GlueGraph, not a PlanResult.
         # Callers must check status before calling.
+
+    def test_runtime_repairs_parallel_map_output_alias(self) -> None:
+        glue = GlueGraph(
+            goal="map text",
+            inputs=[IOField(name="items", type="array<string>")],
+            outputs=[IOField(name="result", type="object")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="map",
+                        op="parallel.map",
+                        config={
+                            "op": "template.render",
+                            "item_input": "text",
+                            "op_config": {"template": "{{text}}"},
+                            "max_items": 10,
+                        },
+                    )
+                ],
+                edges=[{"from": "input.items", "to": "map.items"}],
+                outputs={"result": "map.mapped"},
+            ),
+        )
+
+        exec_result = run_glue_graph(glue, {"items": ["a", "b"]})
+        assert exec_result.outputs == {
+            "result": [
+                {"rendered": "a"},
+                {"rendered": "b"},
+            ]
+        }
+        assert exec_result.repairs == [
+            "graph:map: rewrite mapped output references to results"
+        ]
+
+    def test_runtime_repairs_array_map_input_alias(self) -> None:
+        glue = GlueGraph(
+            goal="map field",
+            inputs=[IOField(name="items", type="array<object>")],
+            outputs=[IOField(name="result", type="object")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="map",
+                        op="array.map",
+                        config={"field": "name"},
+                    )
+                ],
+                edges=[{"from": "input.items", "to": "map.array"}],
+                outputs={"result": "map.mapped"},
+            ),
+        )
+
+        exec_result = run_glue_graph(
+            glue,
+            {"items": [{"name": "alice"}, {"name": "bob"}]},
+        )
+        assert exec_result.outputs == {"result": ["alice", "bob"]}
+        assert exec_result.repairs == [
+            "graph:map: rewrite array.map input references from array to items"
+        ]
+
+    def test_normalizes_legacy_parallel_map_shorthand(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        glue = GlueGraph(
+            goal="normalize strings",
+            inputs=[IOField(name="strings", type="array<string>")],
+            outputs=[IOField(name="normalized", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="normalize_all",
+                        op="parallel.map",
+                        config={"operation": "text.normalize"},
+                    )
+                ],
+                edges=[{"from": "input.strings", "to": "normalize_all.array"}],
+                outputs={"normalized": "normalize_all.normalized"},
+            ),
+        )
+
+        exec_result = run_glue_graph(
+            glue,
+            {"strings": ["  Alice  ", " BOB "]},
+            registry=reg,
+        )
+        assert exec_result.outputs == {"normalized": ["alice", "bob"]}
+        assert exec_result.repairs == [
+            "graph:normalize_all: rewrite parallel.map input references from array to items",
+            "graph:normalize_all: lift parallel.map operation 'text.normalize' into runtime config",
+            "graph:normalize_all: enable aggregated named outputs for parallel.map",
+        ]
+
+    def test_runtime_repairs_parallel_map_result_alias(self) -> None:
+        glue = GlueGraph(
+            goal="map text",
+            inputs=[IOField(name="items", type="array<string>")],
+            outputs=[IOField(name="result", type="object")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="map",
+                        op="parallel.map",
+                        config={
+                            "op": "template.render",
+                            "item_input": "text",
+                            "op_config": {"template": "{{text}}"},
+                            "max_items": 10,
+                        },
+                    )
+                ],
+                edges=[{"from": "input.items", "to": "map.items"}],
+                outputs={"result": "map.result"},
+            ),
+        )
+
+        exec_result = run_glue_graph(glue, {"items": ["a", "b"]})
+        assert exec_result.outputs == {
+            "result": [
+                {"rendered": "a"},
+                {"rendered": "b"},
+            ]
+        }
+        assert exec_result.repairs == [
+            "graph:map: enable aggregated named outputs for parallel.map",
+            "runtime:map: rewrite result output references to results",
+        ]
+
+    def test_normalizes_nested_parallel_map_skill_target(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        glue = GlueGraph(
+            goal="normalize strings",
+            inputs=[IOField(name="strings", type="array<string>")],
+            outputs=[IOField(name="normalized", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="normalize_all",
+                        op="parallel.map",
+                        config={
+                            "op": "skill.invoke",
+                            "op_config": {
+                                "skill_id": {
+                                    "skill_id": "text.normalize.v1",
+                                    "version": "1.0.0",
+                                    "input_mapping": {"text": "item"},
+                                    "output_mapping": {"normalized": "result"},
+                                },
+                                "version": "1.0.0",
+                            },
+                        },
+                    )
+                ],
+                edges=[{"from": "input.strings", "to": "normalize_all.items"}],
+                outputs={"normalized": "normalize_all.normalized"},
+            ),
+        )
+
+        exec_result = run_glue_graph(
+            glue,
+            {"strings": ["  Alice  ", " BOB "]},
+            registry=reg,
+        )
+        assert exec_result.outputs == {"normalized": ["alice", "bob"]}
+        assert exec_result.repairs == [
+            "graph:normalize_all: flatten nested parallel.map skill.invoke target 'text.normalize.v1'",
+            "graph:normalize_all: derive parallel.map item_input 'text' from skill mapping",
+            "graph:normalize_all: enable aggregated outputs from nested skill output mapping",
+        ]
 
 
 # ── save / load ──────────────────────────────────────────────────────
@@ -239,6 +424,113 @@ class TestCLIPlanAndRun:
         ])
         traces = list(trace_root.glob("*.json"))
         assert len(traces) == 1
+
+    def test_json_output_includes_runtime_repairs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        broken_glue = GlueGraph(
+            goal="broken but repairable",
+            inputs=[IOField(name="items", type="array<string>")],
+            outputs=[IOField(name="result", type="object")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="map",
+                        op="parallel.map",
+                        config={
+                            "op": "template.render",
+                            "item_input": "text",
+                            "op_config": {"template": "{{text}}"},
+                            "max_items": 10,
+                        },
+                    )
+                ],
+                edges=[{"from": "input.items", "to": "map.items"}],
+                outputs={"result": "map.mapped"},
+            ),
+        )
+
+        def _fake_compose_plan(*args: object, **kwargs: object) -> PlanResult:
+            return PlanResult(status="success", graph=broken_glue)
+
+        monkeypatch.setattr("graphsmith.planner.compose_plan", _fake_compose_plan)
+
+        result = runner.invoke(app, [
+            "plan-and-run", "repairable",
+            "--registry", str(Path.cwd()),
+            "--input", '{"items":["a","b"]}',
+            "--output-format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["outputs"] == {
+            "result": [
+                {"rendered": "a"},
+                {"rendered": "b"},
+            ]
+        }
+        assert data["runtime_repairs"] == [
+            "graph:map: rewrite mapped output references to results"
+        ]
+
+    def test_live_provider_is_used_for_execution(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        reg_root = tmp_path / "reg"
+        runner.invoke(app, [
+            "publish", str(EXAMPLE_DIR / "text.summarize.v1"),
+            "--registry", str(reg_root),
+        ])
+
+        llm_glue = GlueGraph(
+            goal="summarize",
+            inputs=[
+                IOField(name="text", type="string"),
+                IOField(name="max_sentences", type="integer"),
+            ],
+            outputs=[IOField(name="summary", type="string")],
+            effects=["llm_inference"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="summarize",
+                        op="skill.invoke",
+                        config={"skill_id": "text.summarize.v1", "version": "1.0.0"},
+                    )
+                ],
+                edges=[
+                    {"from": "input.text", "to": "summarize.text"},
+                    {"from": "input.max_sentences", "to": "summarize.max_sentences"},
+                ],
+                outputs={"summary": "summarize.summary"},
+            ),
+        )
+
+        def _fake_compose_plan(*args: object, **kwargs: object) -> PlanResult:
+            return PlanResult(status="success", graph=llm_glue)
+
+        monkeypatch.setattr("graphsmith.planner.compose_plan", _fake_compose_plan)
+        monkeypatch.setattr(
+            "graphsmith.ops.providers.create_provider",
+            lambda *args, **kwargs: EchoLLMProvider(prefix=""),
+        )
+
+        result = runner.invoke(app, [
+            "plan-and-run", "summarize",
+            "--registry", str(reg_root),
+            "--provider", "anthropic",
+            "--input", '{"text":"Cats sleep a lot","max_sentences":1}',
+            "--output-format", "json",
+        ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "Cats sleep a lot" in data["outputs"]["summary"]
 
 
 # ── CLI: run-plan ────────────────────────────────────────────────────

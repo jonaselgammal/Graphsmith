@@ -541,7 +541,12 @@ def plan_and_run(
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
     )
-    llm_provider = EchoLLMProvider(prefix="") if mock_llm else None
+    llm_provider = _make_execution_provider(
+        mock_llm,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+    )
 
     # 1. Plan
     result = compose_plan(goal, reg, planner_backend)
@@ -578,9 +583,15 @@ def plan_and_run(
             "plan": {"goal": result.graph.goal, "status": result.status},
             "outputs": exec_result.outputs,
         }
+        if getattr(exec_result, "repairs", None):
+            out["runtime_repairs"] = exec_result.repairs
         typer.echo(json.dumps(out, indent=2))
     else:
         typer.echo(json.dumps(exec_result.outputs, indent=2))
+        if getattr(exec_result, "repairs", None):
+            typer.echo("\nRuntime repairs:")
+            for action in exec_result.repairs:
+                typer.echo(f"  - {action}")
 
     if trace:
         typer.echo("\n--- trace ---")
@@ -1153,6 +1164,29 @@ def _resolve_planner_backend_name(
         return "ir"
 
     return "mock"
+
+
+def _make_execution_provider(
+    mock_llm: bool,
+    *,
+    provider: str = "echo",
+    model: str | None = None,
+    base_url: str | None = None,
+) -> Any:
+    """Build an execution-time LLM provider when the CLI requested one."""
+    if mock_llm:
+        from graphsmith.ops.llm_provider import EchoLLMProvider
+        return EchoLLMProvider(prefix="")
+
+    if provider == "echo" and model is None and base_url is None:
+        return None
+
+    from graphsmith.ops.providers import ProviderConfigError, create_provider
+    try:
+        return create_provider(provider, model=model, base_url=base_url)
+    except (ProviderConfigError, ProviderError) as exc:
+        typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def _summarize_plan(glue: Any) -> str:

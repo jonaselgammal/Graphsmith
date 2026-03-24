@@ -77,6 +77,7 @@ def parallel_map(
         )
 
     include_trace = bool(config.get("include_trace", False))
+    aggregate_outputs = bool(config.get("aggregate_outputs", False))
 
     # Late import to avoid circular dependency
     from graphsmith.ops.registry import _PURE_OPS
@@ -164,7 +165,7 @@ def parallel_map(
             ))
 
     outputs: dict[str, Any] = {"results": results}
-    if mode == "inline_graph":
+    if mode == "inline_graph" or aggregate_outputs:
         outputs.update(aggregated)
     if trace is None:
         return outputs

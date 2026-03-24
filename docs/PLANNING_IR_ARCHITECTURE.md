@@ -129,13 +129,20 @@ Drop-in replacement for `LLMPlannerBackend` — same interface, different pipeli
 
 ## Deterministic local repair
 
-Graphsmith now includes a narrow local repair pass between IR parsing and
-final compiler failure.
+Graphsmith now includes a bounded multi-layer repair path:
+- IR-local repair before final compiler failure
+- graph-level contract normalization before validation/execution
+- one runtime-informed graph patch retry on specific execution failures
+
+### 1. IR-local repair
+
+This runs between IR parsing and final compiler failure.
 
 Current scope:
 - branch blocks with missing or incomplete `then_outputs` / `else_outputs`
 - loop blocks with missing `final_outputs`
 - loop blocks with exactly one body input but no explicit `$item` binding
+- `array.map` operations emitted as bound sources instead of config
 
 Repair is intentionally bounded:
 - no extra LLM call
@@ -151,11 +158,42 @@ Examples:
   in `normalize`, the repair pass can infer `final_outputs.normalized =
   normalize.normalized`
 
-This is not yet a general repair loop. It does not:
+### 2. Graph contract normalization
+
+This runs on the compiled `GlueGraph` before validation and again before
+execution of saved plans.
+
+Current scope:
+- rewrite legacy `array.map` / `parallel.map` input alias `array -> items`
+- lift `parallel.map` shorthand like `operation: "text.normalize"` into
+  runtime config
+- flatten nested `parallel.map` `skill.invoke` targets emitted as objects
+- enable aggregated named loop outputs when the graph references
+  `parallel.map.<field>` rather than only `parallel.map.results`
+- rewrite stale loop output alias `mapped -> results`
+
+This matters because saved plans and direct graph output can still contain
+legacy or partially-normalized loop contracts even when the semantic plan is
+basically correct.
+
+### 3. Runtime-informed patch retry
+
+This is still intentionally narrow: one retry after a specific runtime failure.
+
+Current scope:
+- rewrite stale `mapped -> results` references when execution proves only
+  `results` exists
+- rewrite stale `result -> results` references for collection outputs
+- rewrite runtime input alias failures like `array.map` / `parallel.map`
+  expecting `items`
+
+This is not yet a general repair loop. It still does not:
 - fix arbitrary bad dataflow
-- synthesize missing branch bodies
-- recover from unknown skills or type mismatches
-- use runtime traces to repair plans
+- synthesize missing branch or loop bodies
+- recover from unknown skills or broad type mismatches
+- classify and patch arbitrary regions from full traces
+- guarantee user-intended output naming when the plan is semantically close but
+  contract fidelity is weak
 
 ## Future: structural repair loop
 

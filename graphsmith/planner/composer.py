@@ -67,8 +67,20 @@ def compose_plan(
 
 def _validate_glue_graph(result: PlanResult) -> PlanResult:
     """Wrap the GlueGraph in a synthetic SkillPackage and validate it."""
+    from graphsmith.planner.graph_repair import normalize_glue_graph_contracts
+
     glue = result.graph
     assert glue is not None
+    glue, actions = normalize_glue_graph_contracts(glue)
+    if actions:
+        result = result.model_copy(
+            update={
+                "graph": glue,
+                "repair_actions": [*result.repair_actions, *actions],
+            }
+        )
+    else:
+        result = result.model_copy(update={"graph": glue})
 
     pkg = glue_to_skill_package(glue)
 
@@ -122,17 +134,38 @@ def run_glue_graph(
     Raises PlannerError if the glue graph fails validation.
     Raises ExecutionError if execution fails.
     """
+    from graphsmith.planner.graph_repair import (
+        normalize_glue_graph_contracts,
+        repair_glue_graph_from_runtime_error,
+    )
     from graphsmith.runtime.executor import run_skill_package
 
-    pkg = glue_to_skill_package(glue)
-    try:
-        validate_skill_package(pkg)
-    except ValidationError as exc:
-        raise PlannerError(f"Glue graph validation failed: {exc}") from exc
+    current_glue, runtime_repairs = normalize_glue_graph_contracts(glue)
+    for attempt in range(2):
+        pkg = glue_to_skill_package(current_glue)
+        try:
+            validate_skill_package(pkg)
+        except ValidationError as exc:
+            raise PlannerError(f"Glue graph validation failed: {exc}") from exc
 
-    return run_skill_package(
-        pkg, inputs, llm_provider=llm_provider, registry=registry,
-    )
+        try:
+            result = run_skill_package(
+                pkg, inputs, llm_provider=llm_provider, registry=registry,
+            )
+            result.repairs = list(runtime_repairs)
+            return result
+        except ExecutionError as exc:
+            if attempt > 0:
+                raise
+            repaired_glue, actions = repair_glue_graph_from_runtime_error(
+                current_glue, str(exc),
+            )
+            if not actions:
+                raise
+            current_glue = repaired_glue
+            runtime_repairs.extend(actions)
+
+    raise PlannerError("Glue graph execution repair loop exited unexpectedly")
 
 
 def save_plan(glue: GlueGraph, path: str | Path) -> None:

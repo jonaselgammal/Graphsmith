@@ -100,11 +100,12 @@ def run_skill_package(
 class ExecutionResult:
     """Container for execution outputs and trace."""
 
-    __slots__ = ("outputs", "trace")
+    __slots__ = ("outputs", "trace", "repairs")
 
     def __init__(self, outputs: dict[str, Any], trace: RunTrace) -> None:
         self.outputs = outputs
         self.trace = trace
+        self.repairs: list[str] = []
 
 
 # ── internals ────────────────────────────────────────────────────────

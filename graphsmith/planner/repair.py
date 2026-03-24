@@ -12,6 +12,7 @@ from graphsmith.planner.compiler import (
     CompilerError,
     InvalidBranchBlockError,
     InvalidLoopBlockError,
+    UnknownInputError,
 )
 from graphsmith.planner.ir import IRBlock, IROutputRef, IRSource, IRStep, PlanningIR
 
@@ -40,6 +41,8 @@ def repair_ir_locally(ir: PlanningIR, error: CompilerError) -> RepairResult:
         repaired, actions = _repair_loop_block(repaired, error)
     elif isinstance(error, InvalidBranchBlockError):
         repaired, actions = _repair_branch_block(repaired, error)
+    elif isinstance(error, UnknownInputError):
+        repaired, actions = _repair_unknown_input_contract(repaired, error)
 
     return RepairResult(ir=repaired, actions=actions)
 
@@ -215,6 +218,42 @@ def _fill_missing_branch_outputs(
         repaired[port] = IROutputRef(step=terminal_step, port=port)
         added.append(port)
     return repaired, added
+
+
+def _repair_unknown_input_contract(
+    ir: PlanningIR, error: UnknownInputError,
+) -> tuple[PlanningIR, list[RepairAction]]:
+    step_name = str(error.details.get("step_name", ""))
+    source_port = str(error.details.get("source_port", ""))
+    input_name = str(error.details.get("input_name", ""))
+    actions: list[RepairAction] = []
+    updated_steps: list[IRStep] = []
+
+    for step in ir.steps:
+        if (
+            step.name == step_name
+            and step.skill_id == "array.map"
+            and source_port == "operation"
+            and "." in input_name
+        ):
+            sources = dict(step.sources)
+            config = dict(step.config)
+            sources.pop("operation", None)
+            config["operation"] = input_name
+            updated_steps.append(step.model_copy(update={"sources": sources, "config": config}))
+            actions.append(
+                RepairAction(
+                    target=f"step:{step_name}",
+                    action=f"move array.map operation '{input_name}' from sources into config",
+                    reason="planner emitted array.map operation as a bound input instead of config",
+                )
+            )
+            continue
+        updated_steps.append(step)
+
+    if not actions:
+        return ir, []
+    return ir.model_copy(update={"steps": updated_steps}), actions
 
 
 def _normalize_block_contracts(
