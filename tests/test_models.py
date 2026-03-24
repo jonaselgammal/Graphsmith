@@ -32,6 +32,19 @@ def test_iofield_optional() -> None:
     assert f.description == "count"
 
 
+def test_iofield_structured_type() -> None:
+    f = IOField(
+        name="user",
+        type={
+            "type": "object",
+            "properties": {"name": "string", "age": "optional<integer>"},
+            "required": ["name"],
+        },
+    )
+    assert f.type["type"] == "object"
+    assert f.type["properties"]["name"] == "string"
+
+
 # ── GraphEdge alias ──────────────────────────────────────────────────
 
 

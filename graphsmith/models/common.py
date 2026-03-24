@@ -6,7 +6,14 @@ from pydantic import BaseModel, Field
 
 
 class IOField(BaseModel):
-    """Input or output field contract."""
+    """Input or output field contract.
+
+    `type` accepts either:
+    - a scalar/parameterised type string such as `string`, `array<string>`,
+      `union<string, integer>`, `record<object>`, `ref<User>`
+    - a structured mapping such as
+      `{"type": "object", "properties": {"name": "string"}}`
+    """
 
     name: str
     type: Any

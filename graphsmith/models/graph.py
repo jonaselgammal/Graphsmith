@@ -12,7 +12,7 @@ class GraphNode(BaseModel):
     op: str
     inputs: dict[str, str] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
-    when: str | None = None
+    when: str | None = None  # optional condition address, e.g. "gate.result" or "!gate.result"
     retry: int | None = None
     timeout_ms: int | None = None
 

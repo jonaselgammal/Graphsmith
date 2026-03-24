@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from graphsmith.constants import ALLOWED_EFFECTS, ALLOWED_TYPES, PRIMITIVE_OPS
+from graphsmith.constants import ALLOWED_EFFECTS, PRIMITIVE_OPS
 from graphsmith.exceptions import ValidationError
 from graphsmith.models import SkillPackage
+from graphsmith.type_system import validate_type_spec
 
 
 def _split_address(address: str) -> tuple[str, str]:
@@ -21,6 +22,13 @@ def _split_address(address: str) -> tuple[str, str]:
     return address.split(".", 1)
 
 
+def _split_condition_address(condition: str) -> tuple[bool, str, str]:
+    """Split a node condition into (negated, scope, port)."""
+    raw = condition[1:] if condition.startswith("!") else condition
+    scope, port = _split_address(raw)
+    return condition.startswith("!"), scope, port
+
+
 def validate_skill_package(pkg: SkillPackage) -> list[str]:
     """Validate a parsed skill package.
 
@@ -34,6 +42,7 @@ def validate_skill_package(pkg: SkillPackage) -> list[str]:
     _validate_node_ids(pkg)
     _validate_ops(pkg)
     _validate_edges(pkg)
+    _validate_when_conditions(pkg)
     _validate_binding_conflicts(pkg)
     _validate_required_inputs(pkg)
     _validate_outputs(pkg)
@@ -67,54 +76,16 @@ _PLACEHOLDER_TOKENS = {
 
 def _check_type_string(type_val: str, *, context: str) -> None:
     """Validate a single type string against the spec grammar."""
-    if isinstance(type_val, dict):
-        # structured object form: type: object, schema: {...}
-        return
-    if not isinstance(type_val, str):
-        raise ValidationError(
-            f"Type must be a string or object mapping in {context}, got {type(type_val).__name__}"
-        )
-    # Detect placeholder tokens copied from prompt templates
-    if type_val.upper() in _PLACEHOLDER_TOKENS or type_val in _PLACEHOLDER_TOKENS:
-        raise ValidationError(
-            f"Type '{type_val}' in {context} looks like a placeholder token. "
-            "Use a real type: string, integer, number, boolean, bytes, object, "
-            "array<string>, optional<string>."
-        )
-    # Handle parameterised types like array<string> and optional<integer>
-    raw = type_val
-    while raw.endswith(">"):
-        open_idx = raw.find("<")
-        if open_idx == -1:
+    if isinstance(type_val, str):
+        # Detect placeholder tokens copied from prompt templates
+        if type_val.upper() in _PLACEHOLDER_TOKENS or type_val in _PLACEHOLDER_TOKENS:
             raise ValidationError(
-                f"Malformed parameterised type '{type_val}' in {context}"
+                f"Type '{type_val}' in {context} looks like a placeholder token. "
+                "Use a real type: string, integer, number, boolean, bytes, object, "
+                "array<string>, optional<string>, union<string, integer>, record<string>, "
+                "or ref<SchemaName>."
             )
-        outer = raw[:open_idx]
-        if outer not in ("array", "optional"):
-            if not outer:
-                raise ValidationError(
-                    f"Malformed type '{type_val}' in {context}: "
-                    f"not a valid type. "
-                    "Use a base type (string, integer, number, boolean, bytes, object) "
-                    "or a parameterised type (array<string>, optional<integer>)."
-                )
-            raise ValidationError(
-                f"Unknown parameterised type '{outer}' in {context}. "
-                "Only 'array' and 'optional' accept type parameters."
-            )
-        raw = raw[open_idx + 1 : -1]
-
-    if raw not in ALLOWED_TYPES:
-        hint = ""
-        if raw in ("array", "optional"):
-            hint = (
-                f" Did you mean '{raw}<string>'?"
-                f" '{raw}' requires a type parameter: {raw}<T>."
-            )
-        raise ValidationError(
-            f"Unknown type '{raw}' in {context}.{hint} "
-            f"Allowed base types: {', '.join(sorted(ALLOWED_TYPES))}"
-        )
+    validate_type_spec(type_val, context=context)
 
 
 def _validate_node_ids(pkg: SkillPackage) -> None:
@@ -197,6 +168,26 @@ def _validate_binding_conflicts(pkg: SkillPackage) -> None:
             bindings[key] = address
 
 
+def _validate_when_conditions(pkg: SkillPackage) -> None:
+    node_ids = {node.id for node in pkg.graph.nodes}
+    input_names = {field.name for field in pkg.skill.inputs}
+
+    for node in pkg.graph.nodes:
+        if node.when is None:
+            continue
+        _negated, scope, port = _split_condition_address(node.when)
+        if scope == "input":
+            if port not in input_names:
+                raise ValidationError(
+                    f"Node '{node.id}' when-condition references undeclared input '{port}'. "
+                    f"Declared inputs: {', '.join(sorted(input_names))}"
+                )
+        elif scope not in node_ids:
+            raise ValidationError(
+                f"Node '{node.id}' when-condition references unknown node '{scope}'"
+            )
+
+
 def _validate_required_inputs(pkg: SkillPackage) -> None:
     """Check that every required skill input is wired to at least one edge."""
     required_inputs = {f.name for f in pkg.skill.inputs if f.required}
@@ -205,10 +196,16 @@ def _validate_required_inputs(pkg: SkillPackage) -> None:
         src_scope, src_port = _split_address(edge.from_)
         if src_scope == "input":
             wired.add(src_port)
+    for node in pkg.graph.nodes:
+        if node.when is None:
+            continue
+        _negated, scope, port = _split_condition_address(node.when)
+        if scope == "input":
+            wired.add(port)
     missing = required_inputs - wired
     if missing:
         raise ValidationError(
-            f"Required input(s) not wired by any edge: {', '.join(sorted(missing))}"
+            f"Required input(s) not wired by any edge or condition: {', '.join(sorted(missing))}"
         )
 
 
@@ -250,6 +247,16 @@ def _validate_dag(pkg: SkillPackage) -> None:
         if dst_scope not in adj[src_scope]:
             adj[src_scope].add(dst_scope)
             indegree[dst_scope] += 1
+
+    for node in pkg.graph.nodes:
+        if node.when is None:
+            continue
+        _negated, src_scope, _ = _split_condition_address(node.when)
+        if src_scope == "input":
+            continue
+        if node.id not in adj[src_scope]:
+            adj[src_scope].add(node.id)
+            indegree[node.id] += 1
 
     queue = sorted(nid for nid, deg in indegree.items() if deg == 0)
     visited = 0

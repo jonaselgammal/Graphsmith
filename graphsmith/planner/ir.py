@@ -8,6 +8,7 @@ compiler.py lowers IR → GlueGraph.
 from __future__ import annotations
 
 from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -23,10 +24,20 @@ class IRSource(BaseModel):
     """Where a step gets one of its inputs.
 
     step="input" means a graph-level input; otherwise it names another step.
+    binding references a first-class named value alias defined in PlanningIR.bindings.
     """
 
-    step: str
-    port: str
+    step: str | None = None
+    port: str | None = None
+    binding: str | None = None
+
+
+class IRBinding(BaseModel):
+    """A reusable named value alias available to top-level steps."""
+
+    name: str
+    source: IRSource
+    description: str = ""
 
 
 class IRStep(BaseModel):
@@ -40,6 +51,8 @@ class IRStep(BaseModel):
     version: str = "1.0.0"
     sources: dict[str, IRSource] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
+    when: IRSource | None = None
+    unless: bool = False
 
 
 class IROutputRef(BaseModel):
@@ -47,6 +60,21 @@ class IROutputRef(BaseModel):
 
     step: str
     port: str
+
+
+class IRBlock(BaseModel):
+    """Forward-compatible structured control-flow region.
+
+    Blocks are part of the richer IR surface but are not yet lowerable by the
+    v1 DAG compiler/runtime.
+    """
+
+    name: str
+    kind: Literal["branch", "loop", "function"]
+    inputs: dict[str, IRSource] = Field(default_factory=dict)
+    steps: list[IRStep] = Field(default_factory=list)
+    final_outputs: dict[str, IROutputRef] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class PlanningIR(BaseModel):
@@ -58,7 +86,9 @@ class PlanningIR(BaseModel):
 
     goal: str
     inputs: list[IRInput]
+    bindings: list[IRBinding] = Field(default_factory=list)
     steps: list[IRStep]
+    blocks: list[IRBlock] = Field(default_factory=list)
     final_outputs: dict[str, IROutputRef]
     effects: list[str] = Field(default_factory=lambda: ["pure"])
     reasoning: str = ""
