@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from graphsmith.planner.ir_backend import CandidateResult, IRPlannerBackend
+from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
 from graphsmith.registry.local import LocalRegistry
 from graphsmith.skills.autogen import (
@@ -20,6 +20,7 @@ from graphsmith.skills.autogen import (
     format_result,
     generate_skill_files,
     register_generated_op,
+    unregister_generated_op,
     validate_and_test,
 )
 
@@ -39,6 +40,8 @@ def detect_missing_skill(
     goal: str,
     result: PlanResult,
     candidates: list[CandidateResult],
+    *,
+    available_skill_ids: set[str] | None = None,
 ) -> MissingSkillDiagnosis:
     """Analyze a failed plan to determine if a missing skill is the cause.
 
@@ -59,6 +62,13 @@ def detect_missing_skill(
         return MissingSkillDiagnosis(
             is_missing=False,
             reason="Goal does not match any generatable skill template",
+        )
+
+    available = available_skill_ids or set()
+    if spec.skill_id in available:
+        return MissingSkillDiagnosis(
+            is_missing=False,
+            reason=f"Skill {spec.skill_id} already exists in the registry/candidate set",
         )
 
     # Check if the matching skill already exists in the candidate plan
@@ -120,7 +130,7 @@ class ClosedLoopResult(BaseModel):
 
 def run_closed_loop(
     goal: str,
-    backend: IRPlannerBackend,
+    backend: Any,
     registry: LocalRegistry,
     *,
     output_dir: str | Path | None = None,
@@ -140,6 +150,7 @@ def run_closed_loop(
     from graphsmith.planner.candidates import retrieve_candidates
 
     result = ClosedLoopResult()
+    generated_registered = False
 
     # ── Step 1: Initial plan attempt ──────────────────────────────
     cands = retrieve_candidates(goal, registry)
@@ -156,6 +167,18 @@ def run_closed_loop(
 
     # ── Step 2: Detect missing skill ──────────────────────────────
     diagnosis = detect_missing_skill(goal, plan_result, backend.last_candidates)
+    available_ids = {f"{entry.id}" for entry in cands}
+    if hasattr(registry, "list_all"):
+        try:
+            available_ids.update(entry.id for entry in registry.list_all())
+        except Exception:
+            pass
+    diagnosis = detect_missing_skill(
+        goal,
+        plan_result,
+        backend.last_candidates,
+        available_skill_ids=available_ids,
+    )
     result.detected_missing = diagnosis.is_missing
     result.diagnosis_reason = diagnosis.reason
 
@@ -210,22 +233,27 @@ def run_closed_loop(
 
     # ── Step 6: Publish to registry + replan ──────────────────────
     try:
+        register_generated_op(spec)
+        generated_registered = True
         registry.publish(str(skill_dir))
     except Exception as exc:
         result.stopped_reason = "publish_failed"
         result.generation_errors.append(f"Publish failed: {exc}")
         return result
 
-    cands = retrieve_candidates(goal, registry)
-    request = PlanRequest(goal=goal, candidates=cands)
-    replan_result = backend.compose(request)
+    try:
+        cands = retrieve_candidates(goal, registry)
+        request = PlanRequest(goal=goal, candidates=cands)
+        replan_result = backend.compose(request)
 
-    result.replan_status = replan_result.status
-    result.replan_plan = replan_result.graph
-    result.success = replan_result.status == "success" and replan_result.graph is not None
-    result.stopped_reason = "replan_succeeded" if result.success else "replan_failed"
-
-    return result
+        result.replan_status = replan_result.status
+        result.replan_plan = replan_result.graph
+        result.success = replan_result.status == "success" and replan_result.graph is not None
+        result.stopped_reason = "replan_succeeded" if result.success else "replan_failed"
+        return result
+    finally:
+        if generated_registered:
+            unregister_generated_op(spec)
 
 
 # ── Display helpers ──────────────────────────────────────────────

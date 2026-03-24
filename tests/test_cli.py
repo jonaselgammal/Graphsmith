@@ -477,6 +477,7 @@ def test_promote_candidates_with_data(tmp_path: Path) -> None:
     assert len(data) >= 1
     assert data[0]["signature"] == "template.render"
     assert data[0]["frequency"] >= 2
+    assert data[0]["suggested_skill_id"].startswith("promoted.")
 
 
 def test_promote_candidates_text_shows_example_traces(tmp_path: Path) -> None:
@@ -501,6 +502,7 @@ def test_promote_candidates_text_shows_example_traces(tmp_path: Path) -> None:
         ["promote-candidates", "--trace-root", str(trace_root)],
     )
     assert result.exit_code == 0
+    assert "Suggested skill:" in result.output
     assert "Inspect examples:" in result.output
     assert "test.minimal.v1" in result.output
 

@@ -70,7 +70,8 @@ Detection is narrow and explicit:
 
 1. Initial planning must fail (no valid plan produced)
 2. Goal must match an autogen template keyword
-3. The matching skill must not already be in candidate plans
+3. The matching skill must not already exist in the registry or candidate set
+4. The matching skill must not already be used in compiled candidate plans
 
 If any condition is not met, no generation is attempted.
 
@@ -97,6 +98,16 @@ explicit. Common stop reasons are:
 - user declined confirmation
 - publish failed
 - replan failed after publication
+
+## Recent improvements
+
+- `graphsmith solve` is now a real CLI entrypoint again.
+- `solve` defaults to the IR backend so the closed-loop path is actually
+  exercised instead of falling through to the mock planner.
+- Missing-skill detection now checks the live registry/candidate set before
+  deciding a capability is truly absent.
+- Generated ops are now cleaned up after the bounded loop, so autogen does not
+  leak transient runtime ops into unrelated later commands.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of

@@ -782,8 +782,15 @@ def promote_candidates(
     typer.echo(f"Promotion candidates ({len(candidates)}):\n")
     for c in candidates:
         typer.echo(f"  Signature: {c.signature}")
+        if c.structural_signature and c.structural_signature != c.signature:
+            typer.echo(f"  Structural: {c.structural_signature}")
         typer.echo(f"  Frequency: {c.frequency}")
+        typer.echo(f"  Confidence: {c.confidence:.2f}")
         typer.echo(f"  Ops: {' -> '.join(c.ops)}")
+        if c.suggested_skill_id:
+            typer.echo(f"  Suggested skill: {c.suggested_skill_id}")
+        if c.suggested_name:
+            typer.echo(f"  Suggested name: {c.suggested_name}")
         typer.echo(f"  Traces: {', '.join(c.trace_ids[:5])}"
                    + (f" (+{len(c.trace_ids)-5} more)" if len(c.trace_ids) > 5 else ""))
         if c.inferred_inputs:
@@ -804,6 +811,46 @@ def promote_candidates(
                     typer.echo(f"    - {tid}")
         typer.echo(f"  Notes: {c.notes}")
         typer.echo()
+
+
+@app.command("solve")
+def solve(
+    goal: str = typer.Argument(help="Natural-language goal to solve with closed-loop generation."),
+    registry: Optional[str] = typer.Option(None, "--registry", help="Registry root with published skills."),
+    backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai, groq, or ollama."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name override for supported providers."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL override for OpenAI-compatible providers."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo provider for planning/execution."),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Skip confirmation before replanning with a generated skill."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", min=1, max=8, help="Number of IR candidates to generate and rerank."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition before IR generation."),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Directory for generated skill files."),
+) -> None:
+    """Attempt bounded closed-loop missing-skill generation and replanning."""
+    import tempfile
+
+    from graphsmith.registry import LocalRegistry
+    from graphsmith.skills.closed_loop import format_closed_loop_result, run_closed_loop
+
+    reg = LocalRegistry(registry) if registry else LocalRegistry(Path(tempfile.mkdtemp()))
+    planner_backend = _make_planner_backend(
+        backend,
+        mock_llm,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        ir_candidates=ir_candidates,
+        use_decomposition=use_decomposition,
+    )
+    result = run_closed_loop(
+        goal,
+        planner_backend,
+        reg,
+        output_dir=output_dir,
+        auto_approve=auto_approve,
+    )
+    typer.echo(format_closed_loop_result(result))
 
 
 # ── ui ───────────────────────────────────────────────────────────────

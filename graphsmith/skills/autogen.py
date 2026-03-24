@@ -567,6 +567,15 @@ def register_generated_op(spec: SkillSpec) -> None:
     PRIMITIVE_OPS.add(spec.op_name)
 
 
+def unregister_generated_op(spec: SkillSpec) -> None:
+    """Remove a generated op from the in-process runtime registry."""
+    from graphsmith.constants import PRIMITIVE_OPS
+    from graphsmith.ops.registry import _PURE_OPS
+
+    _PURE_OPS.pop(spec.op_name, None)
+    PRIMITIVE_OPS.discard(spec.op_name)
+
+
 # ── Validation + test execution ───────────────────────────────────
 
 
@@ -583,40 +592,46 @@ def validate_and_test(spec: SkillSpec, skill_dir: Path) -> dict[str, Any]:
         "failure_stage": "", "passed": False,
     }
 
+    registered = False
     try:
-        register_generated_op(spec)
-    except Exception as exc:
-        result["failure_stage"] = "registration"
-        result["errors"].append(f"Op registration failed: {exc}")
-        return result
-
-    try:
-        pkg = load_skill_package(str(skill_dir))
-        validate_skill_package(pkg)
-        result["validation"] = "PASS"
-    except (ValidationError, Exception) as exc:
-        result["failure_stage"] = "validation"
-        result["errors"].append(f"Validation: {exc}")
-        return result
-
-    result["examples_total"] = len(spec.examples)
-    for i, ex in enumerate(spec.examples):
         try:
-            output = execute_op(spec.op_name, spec.config, ex["input"])
-            if output == ex["output"]:
-                result["examples_passed"] += 1
-            else:
-                result["failure_stage"] = "examples"
-                result["errors"].append(f"Example {i+1}: expected {ex['output']}, got {output}")
+            register_generated_op(spec)
+            registered = True
         except Exception as exc:
-            result["failure_stage"] = "examples"
-            result["errors"].append(f"Example {i+1}: {exc}")
+            result["failure_stage"] = "registration"
+            result["errors"].append(f"Op registration failed: {exc}")
+            return result
 
-    result["passed"] = (
-        result["validation"] == "PASS"
-        and result["examples_passed"] == result["examples_total"]
-    )
-    return result
+        try:
+            pkg = load_skill_package(str(skill_dir))
+            validate_skill_package(pkg)
+            result["validation"] = "PASS"
+        except (ValidationError, Exception) as exc:
+            result["failure_stage"] = "validation"
+            result["errors"].append(f"Validation: {exc}")
+            return result
+
+        result["examples_total"] = len(spec.examples)
+        for i, ex in enumerate(spec.examples):
+            try:
+                output = execute_op(spec.op_name, spec.config, ex["input"])
+                if output == ex["output"]:
+                    result["examples_passed"] += 1
+                else:
+                    result["failure_stage"] = "examples"
+                    result["errors"].append(f"Example {i+1}: expected {ex['output']}, got {output}")
+            except Exception as exc:
+                result["failure_stage"] = "examples"
+                result["errors"].append(f"Example {i+1}: {exc}")
+
+        result["passed"] = (
+            result["validation"] == "PASS"
+            and result["examples_passed"] == result["examples_total"]
+        )
+        return result
+    finally:
+        if registered:
+            unregister_generated_op(spec)
 
 
 def format_result(result: dict[str, Any], skill_dir: Path) -> str:

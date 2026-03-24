@@ -61,6 +61,17 @@ class TestDetectMissingSkill:
         assert not d.is_missing
         assert "already used" in d.reason
 
+    def test_skill_already_available_not_missing(self) -> None:
+        result = PlanResult(status="failure")
+        d = detect_missing_skill(
+            "compute the median of numbers",
+            result,
+            [],
+            available_skill_ids={"math.median.v1"},
+        )
+        assert not d.is_missing
+        assert "already exists" in d.reason
+
 
 # ── Autogen median template ──────────────────────────────────────
 
