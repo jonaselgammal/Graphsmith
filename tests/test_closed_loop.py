@@ -103,7 +103,6 @@ class TestClosedLoopOrchestration:
 
     def _make_registry_without(self, exclude_skills: set[str] | None = None) -> tuple:
         """Build a registry excluding specific skills."""
-        from graphsmith.parser import load_skill_package
         from graphsmith.registry.local import LocalRegistry
 
         exclude = exclude_skills or set()
@@ -114,7 +113,7 @@ class TestClosedLoopOrchestration:
             if d.is_dir() and (d / "skill.yaml").exists():
                 if d.name not in exclude:
                     try:
-                        reg.publish(load_skill_package(str(d)))
+                        reg.publish(str(d))
                     except Exception:
                         pass
         return reg, reg_dir
@@ -402,6 +401,73 @@ class TestClosedLoopOrchestration:
         assert result.stopped_reason == "single_skill_fallback_succeeded"
         assert result.replan_plan is not None
         assert result.replan_plan.graph.nodes[0].config["skill_id"] == "math.median.v1"
+
+    def test_multi_stage_fallback_after_replan_failure(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.uppercase.v1"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Normalize this text and then convert it to uppercase",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "multi_stage_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert [node.config["skill_id"] for node in result.replan_plan.graph.nodes] == [
+            "text.normalize.v1",
+            "text.uppercase.v1",
+        ]
+
+    def test_multi_stage_fallback_stays_off_for_non_text_chain(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"math.median.v1"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Compute the median and then pretty print it as json",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert not result.success
+        assert result.stopped_reason == "replan_failed"
 
 
 # ── Format output ────────────────────────────────────────────────

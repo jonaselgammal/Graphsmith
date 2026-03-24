@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from graphsmith.planner.decomposition import decompose_deterministic
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
 from graphsmith.registry.local import LocalRegistry
@@ -25,6 +26,17 @@ from graphsmith.skills.autogen import (
     validate_and_test,
 )
 from graphsmith.registry.index import IndexEntry
+
+_TRANSFORM_SKILL_IDS: dict[str, str] = {
+    "normalize": "text.normalize.v1",
+    "summarize": "text.summarize.v1",
+    "extract_keywords": "text.extract_keywords.v1",
+    "title_case": "text.title_case.v1",
+    "classify_sentiment": "text.classify_sentiment.v1",
+    "word_count": "text.word_count.v1",
+    "reshape_json": "json.reshape.v1",
+    "extract_field": "json.extract_field.v1",
+}
 
 
 # ── Missing-skill detection ──────────────────────────────────────
@@ -169,6 +181,11 @@ def _is_multi_stage_goal(goal: str) -> bool:
     )
 
 
+def _can_use_generated_in_composition(spec: SkillSpec) -> bool:
+    """Only allow deterministic composition fallback for config-free transforms."""
+    return not spec.config
+
+
 def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
     """Build a deterministic one-node plan for a generated skill."""
     from graphsmith.models.common import IOField
@@ -189,6 +206,119 @@ def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
             outputs={out["name"]: f"generated.{out['name']}" for out in spec.outputs},
         ),
     )
+
+
+def _find_registry_entry(
+    registry: LocalRegistry, skill_id: str,
+) -> IndexEntry | None:
+    return _find_registry_entry_by_id(registry, skill_id)
+
+
+def _build_linear_pipeline_plan(
+    goal: str,
+    registry: LocalRegistry,
+    skill_ids: list[str],
+) -> GlueGraph | None:
+    """Build a simple linear pipeline from exact skill ids.
+
+    Bounded to chains where each downstream skill has exactly one required input.
+    """
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    if not skill_ids:
+        return None
+
+    packages = []
+    for skill_id in skill_ids:
+        entry = _find_registry_entry(registry, skill_id)
+        if entry is None:
+            return None
+        try:
+            packages.append(registry.fetch(entry.id, entry.version))
+        except Exception:
+            return None
+
+    first_pkg = packages[0]
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+
+    graph_inputs = [
+        IOField(name=field.name, type=field.type)
+        for field in first_pkg.skill.inputs
+    ]
+
+    for idx, pkg in enumerate(packages):
+        node_id = f"step_{idx + 1}"
+        nodes.append(GraphNode(id=node_id, op="skill.invoke", config={"skill_id": pkg.skill.id}))
+        required_inputs = [field for field in pkg.skill.inputs if field.required]
+        if idx == 0:
+            for field in pkg.skill.inputs:
+                edges.append(GraphEdge(from_=f"input.{field.name}", to=f"{node_id}.{field.name}"))
+            continue
+        if len(required_inputs) != 1:
+            return None
+        prev_pkg = packages[idx - 1]
+        if not prev_pkg.skill.outputs:
+            return None
+        upstream_port = prev_pkg.skill.outputs[0].name
+        edges.append(
+            GraphEdge(from_=f"step_{idx}.{upstream_port}", to=f"{node_id}.{required_inputs[0].name}")
+        )
+
+    last_pkg = packages[-1]
+    graph_outputs = {
+        field.name: f"step_{len(packages)}.{field.name}"
+        for field in last_pkg.skill.outputs
+    }
+    outputs = [IOField(name=field.name, type=field.type) for field in last_pkg.skill.outputs]
+
+    return GlueGraph(
+        goal=goal,
+        inputs=graph_inputs,
+        outputs=outputs,
+        effects=sorted({effect for pkg in packages for effect in pkg.skill.effects}),
+        graph=GraphBody(version=1, nodes=nodes, edges=edges, outputs=graph_outputs),
+    )
+
+
+def _build_multi_stage_fallback_plan(
+    goal: str,
+    registry: LocalRegistry,
+    generated_spec: SkillSpec,
+) -> GlueGraph | None:
+    """Build a bounded linear fallback for simple mixed compositions.
+
+    This covers cases like:
+    - normalize -> uppercase
+    - summarize -> uppercase
+    - normalize -> char_count
+    - extract_keywords -> uppercase
+    """
+    if not _can_use_generated_in_composition(generated_spec):
+        return None
+
+    # Keep this bounded to text pipelines for now. Math/JSON mixed chains need
+    # stronger ordering and contract inference than this linear fallback provides.
+    if generated_spec.category != "text":
+        return None
+
+    decomp = decompose_deterministic(goal)
+    skill_ids: list[str] = []
+
+    for transform in decomp.content_transforms:
+        skill_id = _TRANSFORM_SKILL_IDS.get(transform)
+        if skill_id is None:
+            return None
+        skill_ids.append(skill_id)
+
+    if generated_spec.skill_id not in skill_ids:
+        skill_ids.append(generated_spec.skill_id)
+
+    if len(skill_ids) < 2:
+        return None
+
+    return _build_linear_pipeline_plan(goal, registry, skill_ids)
 
 
 # ── Orchestrator ─────────────────────────────────────────────────
@@ -273,6 +403,14 @@ def run_closed_loop(
             result.stopped_reason = "single_skill_fallback_succeeded"
             result.success = True
             return result
+        if exact_spec is not None:
+            fallback_graph = _build_multi_stage_fallback_plan(goal, registry, exact_spec)
+            if fallback_graph is not None:
+                result.replan_status = "success"
+                result.replan_plan = fallback_graph
+                result.stopped_reason = "multi_stage_fallback_succeeded"
+                result.success = True
+                return result
         result.stopped_reason = "existing_skill_replan_failed"
         return result
 
@@ -351,6 +489,13 @@ def run_closed_loop(
             result.replan_status = "success"
             result.replan_plan = _build_single_skill_plan(goal, spec)
             result.stopped_reason = "single_skill_fallback_succeeded"
+            result.success = True
+            return result
+        fallback_graph = _build_multi_stage_fallback_plan(goal, registry, spec)
+        if fallback_graph is not None:
+            result.replan_status = "success"
+            result.replan_plan = fallback_graph
+            result.stopped_reason = "multi_stage_fallback_succeeded"
             result.success = True
             return result
         result.stopped_reason = "replan_failed"

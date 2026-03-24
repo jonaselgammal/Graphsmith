@@ -118,6 +118,9 @@ explicit. Common stop reasons are:
   leak transient runtime ops into unrelated later commands.
 - For true single-step capabilities, Graphsmith can now fall back to a
   deterministic one-node `skill.invoke` graph when replan still fails.
+- For simple text-only multi-stage goals, Graphsmith can now build a
+  deterministic linear fallback graph that composes existing skills with the
+  generated skill when full replan still fails.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of
@@ -130,7 +133,7 @@ echo provider does not produce a usable replan.
 - Only covers the 21 template families in the autogen catalog
 - Cannot generate multi-step or LLM-dependent skills
 - Cannot handle cases where multiple skills are missing
-- Multi-stage mixed compositions after generation are still the main weak spot
+- Config-bearing generated skills inside larger plans are still the main weak spot
 
 ## Files
 
