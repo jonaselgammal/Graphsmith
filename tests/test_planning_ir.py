@@ -9,16 +9,19 @@ from graphsmith.planner.compiler import (
     CompilerError,
     CycleError,
     DuplicateStepError,
+    DuplicateBindingError,
     EmptyStepsError,
     InvalidEffectError,
     SelfLoopError,
+    UnsupportedControlFlowError,
+    UnknownBindingError,
     UnknownInputError,
     UnknownOutputStepError,
     UnknownSourceStepError,
     compile_ir,
 )
 from graphsmith.planner.composer import glue_to_skill_package
-from graphsmith.planner.ir import IRInput, IROutputRef, IRSource, IRStep, PlanningIR
+from graphsmith.planner.ir import IRBinding, IRBlock, IRInput, IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.ir_parser import IRParseError, parse_ir_output
 from graphsmith.planner.ir_prompt import build_ir_planning_context, get_ir_system_message
 from graphsmith.planner.models import PlanRequest
@@ -69,6 +72,17 @@ class TestIRModels:
     def test_ir_default_version(self) -> None:
         step = IRStep(name="s", skill_id="text.summarize.v1")
         assert step.version == "1.0.0"
+
+    def test_ir_binding_source(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="text")],
+            bindings=[IRBinding(name="clean_text", source=IRSource(step="input", port="text"))],
+            steps=[IRStep(name="call", skill_id="text.summarize.v1", sources={"text": IRSource(binding="clean_text")})],
+            final_outputs={"summary": IROutputRef(step="call", port="summary")},
+        )
+        assert ir.bindings[0].name == "clean_text"
+        assert ir.steps[0].sources["text"].binding == "clean_text"
 
 
 # ── Compiler happy-path tests ──────────────────────────────────────
@@ -234,6 +248,62 @@ class TestCompilerHappyPath:
         pkg = glue_to_skill_package(glue)
         validate_skill_package(pkg)
 
+    def test_binding_alias_compiles(self) -> None:
+        ir = PlanningIR(
+            goal="summarize text",
+            inputs=[IRInput(name="text", type="union<string, object>")],
+            bindings=[IRBinding(name="source_text", source=IRSource(step="input", port="text"))],
+            steps=[
+                IRStep(
+                    name="call",
+                    skill_id="text.summarize.v1",
+                    sources={"text": IRSource(binding="source_text")},
+                )
+            ],
+            final_outputs={"summary": IROutputRef(step="call", port="summary")},
+            effects=["llm_inference"],
+        )
+        glue = compile_ir(ir)
+        assert glue.graph.edges[0].from_ == "input.text"
+        assert glue.inputs[0].type == "union<string, object>"
+
+    def test_step_when_compiles_to_node_guard(self) -> None:
+        ir = PlanningIR(
+            goal="conditionally summarize",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[
+                IRStep(
+                    name="call",
+                    skill_id="text.summarize.v1",
+                    sources={"text": IRSource(step="input", port="text")},
+                    when=IRSource(step="input", port="enabled"),
+                )
+            ],
+            final_outputs={"summary": IROutputRef(step="call", port="summary")},
+            effects=["llm_inference"],
+        )
+        glue = compile_ir(ir)
+        assert glue.graph.nodes[0].when == "input.enabled"
+
+    def test_step_unless_compiles_to_negated_guard(self) -> None:
+        ir = PlanningIR(
+            goal="conditionally summarize",
+            inputs=[IRInput(name="text"), IRInput(name="skip", type="boolean")],
+            steps=[
+                IRStep(
+                    name="call",
+                    skill_id="text.summarize.v1",
+                    sources={"text": IRSource(step="input", port="text")},
+                    when=IRSource(step="input", port="skip"),
+                    unless=True,
+                )
+            ],
+            final_outputs={"summary": IROutputRef(step="call", port="summary")},
+            effects=["llm_inference"],
+        )
+        glue = compile_ir(ir)
+        assert glue.graph.nodes[0].when == "!input.skip"
+
 
 # ── Compiler error tests ───────────────────────────────────────────
 
@@ -345,6 +415,61 @@ class TestCompilerErrors:
         with pytest.raises(CycleError):
             compile_ir(ir)
 
+    def test_unknown_binding(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="text")],
+            steps=[
+                IRStep(
+                    name="call",
+                    skill_id="text.summarize.v1",
+                    sources={"text": IRSource(binding="ghost")},
+                ),
+            ],
+            final_outputs={"x": IROutputRef(step="call", port="y")},
+        )
+        with pytest.raises(UnknownBindingError, match="ghost"):
+            compile_ir(ir)
+
+    def test_duplicate_binding_name(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="text")],
+            bindings=[
+                IRBinding(name="alias", source=IRSource(step="input", port="text")),
+                IRBinding(name="alias", source=IRSource(step="input", port="text")),
+            ],
+            steps=[
+                IRStep(name="call", skill_id="text.summarize.v1",
+                       sources={"text": IRSource(binding="alias")}),
+            ],
+            final_outputs={"x": IROutputRef(step="call", port="y")},
+        )
+        with pytest.raises(DuplicateBindingError, match="alias"):
+            compile_ir(ir)
+
+    def test_blocks_are_explicitly_unsupported(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="text")],
+            steps=[
+                IRStep(name="call", skill_id="text.normalize.v1",
+                       sources={"text": IRSource(step="input", port="text")}),
+            ],
+            blocks=[
+                IRBlock(
+                    name="conditional",
+                    kind="branch",
+                    steps=[
+                        IRStep(name="inside", skill_id="text.summarize.v1"),
+                    ],
+                )
+            ],
+            final_outputs={"x": IROutputRef(step="call", port="normalized")},
+        )
+        with pytest.raises(UnsupportedControlFlowError, match="branch"):
+            compile_ir(ir)
+
     def test_compiler_error_has_phase(self) -> None:
         err = DuplicateStepError("foo")
         assert err.phase == "validate_ir"
@@ -412,6 +537,63 @@ class TestIRParser:
         assert ir.steps[0].version == "1.0.0"
         assert ir.effects == ["pure"]
         assert ir.inputs[0].type == "string"
+
+    def test_parse_binding_shorthand(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}],
+            "bindings": [{"name": "source_text", "source": "input.text"}],
+            "steps": [
+                {"name": "c", "skill_id": "text.normalize.v1",
+                 "sources": {"text": "$source_text"}}
+            ],
+            "final_outputs": {"out": {"step": "c", "port": "normalized"}},
+        }
+        ir = parse_ir_output(json.dumps(data), goal="test")
+        assert ir.bindings[0].source.step == "input"
+        assert ir.steps[0].sources["text"].binding == "source_text"
+
+    def test_parse_blocks(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}],
+            "steps": [
+                {"name": "c", "skill_id": "text.normalize.v1",
+                 "sources": {"text": {"step": "input", "port": "text"}}}
+            ],
+            "blocks": [
+                {
+                    "name": "loop_block",
+                    "kind": "loop",
+                    "steps": [
+                        {"name": "inner", "skill_id": "text.normalize.v1", "sources": {"text": "input.text"}}
+                    ],
+                    "final_outputs": {"normalized": "inner.normalized"},
+                }
+            ],
+            "final_outputs": {"out": {"step": "c", "port": "normalized"}},
+        }
+        ir = parse_ir_output(json.dumps(data), goal="test")
+        assert ir.blocks[0].kind == "loop"
+        assert ir.blocks[0].final_outputs["normalized"].step == "inner"
+
+    def test_parse_when_and_unless(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}, {"name": "enabled", "type": "boolean"}],
+            "steps": [
+                {
+                    "name": "c",
+                    "skill_id": "text.normalize.v1",
+                    "sources": {"text": {"step": "input", "port": "text"}},
+                    "when": "input.enabled",
+                    "unless": True,
+                }
+            ],
+            "final_outputs": {"out": {"step": "c", "port": "normalized"}},
+        }
+        ir = parse_ir_output(json.dumps(data), goal="test")
+        assert ir.steps[0].when is not None
+        assert ir.steps[0].when.step == "input"
+        assert ir.steps[0].when.port == "enabled"
+        assert ir.steps[0].unless is True
 
     def test_roundtrip_parse_compile(self) -> None:
         """Parse IR from JSON, compile to GlueGraph, validate."""

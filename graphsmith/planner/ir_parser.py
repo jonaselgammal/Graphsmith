@@ -6,7 +6,15 @@ from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
-from graphsmith.planner.ir import IRInput, IROutputRef, IRSource, IRStep, PlanningIR
+from graphsmith.planner.ir import (
+    IRBinding,
+    IRBlock,
+    IRInput,
+    IROutputRef,
+    IRSource,
+    IRStep,
+    PlanningIR,
+)
 from graphsmith.planner.parser import _extract_json_text
 
 _IR_REQUIRED_KEYS = {"inputs", "steps", "final_outputs"}
@@ -67,6 +75,15 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
         for inp in data["inputs"]
     ]
 
+    bindings = [
+        IRBinding(
+            name=binding["name"],
+            source=_normalize_source(binding["source"]),
+            description=binding.get("description", ""),
+        )
+        for binding in data.get("bindings", [])
+    ]
+
     steps: list[IRStep] = []
     step_names: set[str] = set()
     for s in data["steps"]:
@@ -82,6 +99,46 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
                 version=s.get("version", "1.0.0"),
                 sources=sources,
                 config=s.get("config", {}),
+                when=_normalize_source(s["when"]) if "when" in s else None,
+                unless=bool(s.get("unless", False)),
+            )
+        )
+
+    blocks: list[IRBlock] = []
+    for block in data.get("blocks", []):
+        block_steps: list[IRStep] = []
+        block_step_names: set[str] = set()
+        for step in block.get("steps", []):
+            step_sources = {
+                port: _normalize_source(src)
+                for port, src in step.get("sources", {}).items()
+            }
+            block_step_names.add(step["name"])
+            block_steps.append(
+                IRStep(
+                    name=step["name"],
+                    skill_id=step["skill_id"],
+                    version=step.get("version", "1.0.0"),
+                    sources=step_sources,
+                    config=step.get("config", {}),
+                    when=_normalize_source(step["when"]) if "when" in step else None,
+                    unless=bool(step.get("unless", False)),
+                )
+            )
+        blocks.append(
+            IRBlock(
+                name=block["name"],
+                kind=block["kind"],
+                inputs={
+                    port: _normalize_source(src)
+                    for port, src in block.get("inputs", {}).items()
+                },
+                steps=block_steps,
+                final_outputs=_normalize_final_outputs(
+                    block.get("final_outputs", {}),
+                    block_step_names,
+                ),
+                config=block.get("config", {}),
             )
         )
 
@@ -93,7 +150,9 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
     return PlanningIR(
         goal=goal,
         inputs=inputs,
+        bindings=bindings,
         steps=steps,
+        blocks=blocks,
         final_outputs=final_outputs,
         effects=effects,
         reasoning=reasoning,
@@ -105,10 +164,17 @@ def _normalize_source(src: Any, step_names: set[str] | None = None) -> IRSource:
 
     Accepts:
     - {"step": "...", "port": "..."} (canonical)
+    - {"binding": "..."} (named value alias)
     - "step_name.port_name" (shorthand string)
+    - "$binding_name" (binding shorthand)
     """
     if isinstance(src, dict):
+        if "binding" in src:
+            return IRSource(binding=src["binding"])
         return IRSource(step=src["step"], port=src["port"])
+
+    if isinstance(src, str) and src.startswith("$") and len(src) > 1:
+        return IRSource(binding=src[1:])
 
     if isinstance(src, str) and "." in src:
         parts = src.split(".", 1)

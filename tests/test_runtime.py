@@ -10,9 +10,10 @@ from graphsmith.exceptions import ExecutionError
 from graphsmith.ops.llm_provider import EchoLLMProvider
 from graphsmith.parser import load_skill_package
 from graphsmith.runtime import run_skill_package, topological_order
+from graphsmith.registry import LocalRegistry
 from graphsmith.validator import validate_skill_package
 
-from conftest import minimal_examples, minimal_graph, minimal_skill, write_package
+from conftest import EXAMPLE_DIR, minimal_examples, minimal_graph, minimal_skill, write_package
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -239,3 +240,178 @@ class TestMultiNodeGraph:
         assert len(result.trace.nodes) == 2
         assert result.trace.nodes[0].node_id == "greet"
         assert result.trace.nodes[1].node_id == "wrap"
+
+
+class TestConditionalExecution:
+    def test_when_false_skips_effectful_node(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.conditional.v1",
+            "name": "Conditional",
+            "version": "1.0.0",
+            "description": "Conditional execution.",
+            "inputs": [
+                {"name": "condition", "type": "boolean", "required": True},
+                {"name": "text", "type": "string", "required": True},
+            ],
+            "outputs": [{"name": "result", "type": "string"}],
+            "effects": ["pure"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {"id": "then_step", "op": "template.render", "config": {"template": "then:{{text}}"}, "when": "input.condition"},
+                {"id": "else_step", "op": "template.render", "config": {"template": "else:{{text}}"}, "when": "!input.condition"},
+                {"id": "choose", "op": "fallback.try"},
+            ],
+            "edges": [
+                {"from": "input.text", "to": "then_step.text"},
+                {"from": "input.text", "to": "else_step.text"},
+                {"from": "then_step.rendered", "to": "choose.primary"},
+                {"from": "else_step.rendered", "to": "choose.fallback"},
+            ],
+            "outputs": {"result": "choose.result"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+
+        result = run_skill_package(pkg, {"condition": False, "text": "x"})
+        assert result.outputs == {"result": "else:x"}
+        statuses = {node.node_id: node.status for node in result.trace.nodes}
+        assert statuses["then_step"] == "skipped"
+        assert statuses["else_step"] == "ok"
+        assert statuses["choose"] == "ok"
+
+    def test_when_true_runs_node(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.when_true.v1",
+            "name": "WhenTrue",
+            "version": "1.0.0",
+            "description": "When guard runs node.",
+            "inputs": [
+                {"name": "enabled", "type": "boolean", "required": True},
+                {"name": "text", "type": "string", "required": True},
+            ],
+            "outputs": [{"name": "result", "type": "string"}],
+            "effects": ["pure"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {"id": "step", "op": "template.render", "config": {"template": "{{text}}"}, "when": "input.enabled"},
+            ],
+            "edges": [
+                {"from": "input.text", "to": "step.text"},
+            ],
+            "outputs": {"result": "step.rendered"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+
+        result = run_skill_package(pkg, {"enabled": True, "text": "hello"})
+        assert result.outputs == {"result": "hello"}
+        assert result.trace.nodes[0].status == "ok"
+
+    def test_when_dependency_affects_topological_order(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.when_order.v1",
+            "name": "WhenOrder",
+            "version": "1.0.0",
+            "description": "When dependency participates in order.",
+            "inputs": [{"name": "text", "type": "string", "required": True}],
+            "outputs": [{"name": "result", "type": "string"}],
+            "effects": ["pure"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {"id": "gate", "op": "template.render", "config": {"template": "{{text}}"}},
+                {"id": "step", "op": "template.render", "config": {"template": "[{{text}}]"}, "when": "gate.rendered"},
+            ],
+            "edges": [
+                {"from": "input.text", "to": "gate.text"},
+                {"from": "input.text", "to": "step.text"},
+            ],
+            "outputs": {"result": "step.rendered"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+        assert topological_order(pkg) == ["gate", "step"]
+
+
+class TestBoundedIteration:
+    def test_parallel_map_skill_invoke_in_runtime(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        skill = {
+            "id": "test.iterate.v1",
+            "name": "Iterate",
+            "version": "1.0.0",
+            "description": "Map normalize over an array.",
+            "inputs": [{"name": "items", "type": "array<string>", "required": True}],
+            "outputs": [{"name": "result", "type": "object"}],
+            "effects": ["pure"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "map",
+                    "op": "parallel.map",
+                    "config": {
+                        "op": "skill.invoke",
+                        "item_input": "text",
+                        "op_config": {"skill_id": "text.normalize.v1", "version": "1.0.0"},
+                        "max_items": 10,
+                    },
+                },
+            ],
+            "edges": [
+                {"from": "input.items", "to": "map.items"},
+            ],
+            "outputs": {"result": "map.results"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples={"examples": []})
+        pkg = _load_and_validate(tmp_path / "pkg")
+
+        result = run_skill_package(pkg, {"items": ["  Alice ", "Bob  "]}, registry=reg)
+        assert result.outputs == {
+            "result": [
+                {"normalized": "alice"},
+                {"normalized": "bob"},
+            ]
+        }
+
+    def test_parallel_map_limit_failure_in_runtime(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.iterate.limit.v1",
+            "name": "IterateLimit",
+            "version": "1.0.0",
+            "description": "Map with hard limit.",
+            "inputs": [{"name": "items", "type": "array<string>", "required": True}],
+            "outputs": [{"name": "result", "type": "object"}],
+            "effects": ["pure"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "map",
+                    "op": "parallel.map",
+                    "config": {
+                        "op": "template.render",
+                        "op_config": {"template": "{{item}}"},
+                        "max_items": 1,
+                    },
+                },
+            ],
+            "edges": [
+                {"from": "input.items", "to": "map.items"},
+            ],
+            "outputs": {"result": "map.results"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples={"examples": []})
+        pkg = _load_and_validate(tmp_path / "pkg")
+
+        with pytest.raises(ExecutionError, match="exceeds configured limit 1"):
+            run_skill_package(pkg, {"items": ["a", "b"]})

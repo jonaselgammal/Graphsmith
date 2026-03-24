@@ -71,7 +71,14 @@ def execute_op(
         return _PURE_OPS[op](config, inputs)
 
     if op == "parallel.map":
-        return parallel_map(config, inputs)
+        return parallel_map(
+            config,
+            inputs,
+            registry=registry,
+            llm_provider=llm_provider,
+            depth=depth,
+            call_stack=call_stack or [],
+        )
 
     if op == "llm.generate":
         provider = llm_provider or StubLLMProvider()

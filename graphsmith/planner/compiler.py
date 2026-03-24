@@ -9,11 +9,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from graphsmith.constants import ALLOWED_EFFECTS, ALLOWED_TYPES, PRIMITIVE_OPS
+from graphsmith.constants import ALLOWED_EFFECTS, PRIMITIVE_OPS
 from graphsmith.models.common import IOField
 from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
 from graphsmith.planner.ir import IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.models import GlueGraph
+from graphsmith.type_system import is_supported_type_spec
 
 
 # ── Compiler errors ─────────────────────────────────────────────────
@@ -112,6 +113,40 @@ class CycleError(CompilerError):
         )
 
 
+class DuplicateBindingError(CompilerError):
+    """Two bindings share the same name."""
+
+    def __init__(self, binding_name: str) -> None:
+        super().__init__(
+            f"Duplicate binding name: '{binding_name}'",
+            phase="validate_ir",
+            details={"binding_name": binding_name},
+        )
+
+
+class UnknownBindingError(CompilerError):
+    """A step source references a binding that doesn't exist."""
+
+    def __init__(self, step_name: str, source_port: str, binding_name: str) -> None:
+        super().__init__(
+            f"Step '{step_name}' input '{source_port}' references unknown binding '{binding_name}'",
+            phase="validate_ir",
+            details={"step_name": step_name, "source_port": source_port, "binding_name": binding_name},
+        )
+
+
+class UnsupportedControlFlowError(CompilerError):
+    """The IR uses richer control-flow features that v1 cannot compile."""
+
+    def __init__(self, block_kinds: list[str]) -> None:
+        kinds = ", ".join(block_kinds)
+        super().__init__(
+            f"Planning IR contains unsupported control-flow blocks: {kinds}",
+            phase="validate_ir",
+            details={"block_kinds": block_kinds},
+        )
+
+
 # ── Step name sanitization ─────────────────────────────────────────
 
 
@@ -175,6 +210,9 @@ def compile_ir(ir: PlanningIR) -> GlueGraph:
     name_map = _build_name_map(ir)
     ir = _apply_name_map(ir, name_map)
 
+    _validate_richer_ir(ir)
+    _validate_bindings(ir)
+    ir = _expand_bindings(ir)
     _validate_ir(ir)
     nodes = _build_nodes(ir)
     edges = _build_edges(ir)
@@ -207,7 +245,7 @@ def _apply_name_map(ir: PlanningIR, name_map: dict[str, str]) -> PlanningIR:
     for step in ir.steps:
         new_sources: dict[str, IRSource] = {}
         for port, src in step.sources.items():
-            if src.step == "input":
+            if src.binding is not None or src.step == "input":
                 new_sources[port] = src
             else:
                 new_sources[port] = IRSource(
@@ -221,7 +259,22 @@ def _apply_name_map(ir: PlanningIR, name_map: dict[str, str]) -> PlanningIR:
                 version=step.version,
                 sources=new_sources,
                 config=step.config,
+                when=_remap_source(step.when, name_map),
+                unless=step.unless,
             )
+        )
+
+    new_bindings = []
+    for binding in ir.bindings:
+        if binding.source.binding is not None or binding.source.step == "input":
+            source = binding.source
+        else:
+            source = IRSource(
+                step=name_map.get(binding.source.step, binding.source.step),
+                port=binding.source.port,
+            )
+        new_bindings.append(
+            binding.model_copy(update={"source": source})
         )
 
     new_final_outputs: dict[str, IROutputRef] = {}
@@ -234,7 +287,9 @@ def _apply_name_map(ir: PlanningIR, name_map: dict[str, str]) -> PlanningIR:
     return PlanningIR(
         goal=ir.goal,
         inputs=ir.inputs,
+        bindings=new_bindings,
         steps=new_steps,
+        blocks=ir.blocks,
         final_outputs=new_final_outputs,
         effects=ir.effects,
         reasoning=ir.reasoning,
@@ -258,7 +313,6 @@ def _validate_ir(ir: PlanningIR) -> None:
 
     input_names = {inp.name for inp in ir.inputs}
     step_names = {s.name for s in ir.steps}
-
     # Check effects
     for effect in ir.effects:
         if effect not in ALLOWED_EFFECTS:
@@ -267,13 +321,23 @@ def _validate_ir(ir: PlanningIR) -> None:
     # Check source references
     for step in ir.steps:
         for port, source in step.sources.items():
-            if source.step == "input":
-                if source.port not in input_names:
-                    raise UnknownInputError(step.name, port, source.port)
-            elif source.step == step.name:
-                raise SelfLoopError(step.name, port)
-            elif source.step not in step_names:
-                raise UnknownSourceStepError(step.name, port, source.step)
+            _validate_source_reference(
+                source,
+                step_name=step.name,
+                source_port=port,
+                input_names=input_names,
+                step_names=step_names,
+                binding_names=set(),
+            )
+        if step.when is not None:
+            _validate_source_reference(
+                step.when,
+                step_name=step.name,
+                source_port="when",
+                input_names=input_names,
+                step_names=step_names,
+                binding_names=set(),
+            )
 
     # Check final_output references
     for out_name, ref in ir.final_outputs.items():
@@ -282,6 +346,91 @@ def _validate_ir(ir: PlanningIR) -> None:
 
     # Check for cycles via topological sort
     _check_dag(ir)
+
+
+def _validate_richer_ir(ir: PlanningIR) -> None:
+    if ir.blocks:
+        raise UnsupportedControlFlowError([block.kind for block in ir.blocks])
+
+
+def _validate_bindings(ir: PlanningIR) -> None:
+    input_names = {inp.name for inp in ir.inputs}
+    step_names = {s.name for s in ir.steps}
+    binding_names = {b.name for b in ir.bindings}
+
+    seen_bindings: set[str] = set()
+    for binding in ir.bindings:
+        if binding.name in seen_bindings:
+            raise DuplicateBindingError(binding.name)
+        seen_bindings.add(binding.name)
+        _validate_source_reference(
+            binding.source,
+            step_name=f"(binding:{binding.name})",
+            source_port="source",
+            input_names=input_names,
+            step_names=step_names,
+            binding_names=set(),
+        )
+
+    for step in ir.steps:
+        for port, source in step.sources.items():
+            if source.binding is not None and source.binding not in binding_names:
+                raise UnknownBindingError(step.name, port, source.binding)
+        if step.when is not None and step.when.binding is not None and step.when.binding not in binding_names:
+            raise UnknownBindingError(step.name, "when", step.when.binding)
+
+
+def _expand_bindings(ir: PlanningIR) -> PlanningIR:
+    if not ir.bindings:
+        return ir
+
+    binding_map = {binding.name: binding.source for binding in ir.bindings}
+    new_steps: list[IRStep] = []
+    for step in ir.steps:
+        sources: dict[str, IRSource] = {}
+        for port, source in step.sources.items():
+            if source.binding is not None:
+                resolved = binding_map[source.binding]
+                sources[port] = IRSource(step=resolved.step, port=resolved.port)
+            else:
+                sources[port] = source
+        when = step.when
+        if when is not None and when.binding is not None:
+            resolved = binding_map[when.binding]
+            when = IRSource(step=resolved.step, port=resolved.port)
+        new_steps.append(step.model_copy(update={"sources": sources, "when": when}))
+
+    return ir.model_copy(update={"steps": new_steps})
+
+
+def _validate_source_reference(
+    source: IRSource,
+    *,
+    step_name: str,
+    source_port: str,
+    input_names: set[str],
+    step_names: set[str],
+    binding_names: set[str],
+) -> None:
+    if source.binding is not None:
+        if source.binding not in binding_names:
+            raise UnknownBindingError(step_name, source_port, source.binding)
+        return
+
+    if source.step is None or source.port is None:
+        raise CompilerError(
+            f"Source for '{step_name}.{source_port}' must include step/port or binding",
+            phase="validate_ir",
+            details={"step_name": step_name, "source_port": source_port},
+        )
+
+    if source.step == "input":
+        if source.port not in input_names:
+            raise UnknownInputError(step_name, source_port, source.port)
+    elif source.step == step_name:
+        raise SelfLoopError(step_name, source_port)
+    elif source.step not in step_names:
+        raise UnknownSourceStepError(step_name, source_port, source.step)
 
 
 def _check_dag(ir: PlanningIR) -> None:
@@ -313,15 +462,18 @@ def _check_dag(ir: PlanningIR) -> None:
         raise CycleError(remaining)
 
 
-def _normalize_type(type_str: str) -> str:
+def _normalize_type(type_val: Any) -> Any:
     """Normalize an IR-declared type to a valid Graphsmith type.
 
-    If the type is not in ALLOWED_TYPES (e.g. 'json', 'text'), fall back
-    to 'string'. Also handles parameterized types like 'array<string>'.
+    String types outside the supported grammar (e.g. 'json', 'text') fall back
+    to 'string'. Structured type mappings are preserved for downstream validation.
     """
-    base = type_str.split("<")[0].strip().lower()
-    if base in ALLOWED_TYPES or base in ("array", "optional"):
-        return type_str
+    if isinstance(type_val, dict):
+        return type_val
+    if not isinstance(type_val, str):
+        return "string"
+    if is_supported_type_spec(type_val):
+        return type_val
     return "string"
 
 
@@ -353,8 +505,25 @@ def _build_nodes(ir: PlanningIR) -> list[GraphNode]:
                 **step.config,
             }
 
-        nodes.append(GraphNode(id=step.name, op=op, config=config))
+        when = None
+        if step.when is not None:
+            when = _source_to_condition_address(step.when, negate=step.unless)
+
+        nodes.append(GraphNode(id=step.name, op=op, config=config, when=when))
     return nodes
+
+
+def _remap_source(source: IRSource | None, name_map: dict[str, str]) -> IRSource | None:
+    if source is None or source.binding is not None or source.step == "input":
+        return source
+    return IRSource(step=name_map.get(source.step, source.step), port=source.port)
+
+
+def _source_to_condition_address(source: IRSource, *, negate: bool = False) -> str:
+    prefix = "!" if negate else ""
+    if source.step == "input":
+        return f"{prefix}input.{source.port}"
+    return f"{prefix}{source.step}.{source.port}"
 
 
 def _build_edges(ir: PlanningIR) -> list[GraphEdge]:

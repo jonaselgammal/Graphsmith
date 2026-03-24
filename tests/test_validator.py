@@ -125,11 +125,65 @@ def test_valid_nested_type(tmp_path: Path) -> None:
     validate_skill_package(pkg)
 
 
+def test_valid_union_type(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["inputs"][0]["type"] = "union<string, integer>"
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill)
+    validate_skill_package(pkg)
+
+
+def test_valid_record_type(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["inputs"][0]["type"] = "record<string>"
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill)
+    validate_skill_package(pkg)
+
+
+def test_valid_structured_object_type(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["inputs"][0]["type"] = {
+        "type": "object",
+        "properties": {
+            "name": "string",
+            "count": "optional<integer>",
+        },
+        "required": ["name"],
+    }
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill)
+    validate_skill_package(pkg)
+
+
+def test_valid_structured_ref_type(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["inputs"][0]["type"] = {"type": "ref", "name": "UserProfile"}
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill)
+    validate_skill_package(pkg)
+
+
 def test_invalid_parameterised_type(tmp_path: Path) -> None:
     skill = minimal_skill()
     skill["inputs"][0]["type"] = "list<string>"
     pkg = _make_pkg(tmp_path / "pkg", skill=skill)
     with pytest.raises(ValidationError, match="Unknown parameterised type.*list"):
+        validate_skill_package(pkg)
+
+
+def test_invalid_union_type_requires_two_members(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["inputs"][0]["type"] = "union<string>"
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill)
+    with pytest.raises(ValidationError, match="requires at least two member types"):
+        validate_skill_package(pkg)
+
+
+def test_invalid_structured_object_property_type(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["inputs"][0]["type"] = {
+        "type": "object",
+        "properties": {"name": "float"},
+    }
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill)
+    with pytest.raises(ValidationError, match="Unknown type.*float"):
         validate_skill_package(pkg)
 
 
@@ -165,6 +219,40 @@ def test_malformed_address(tmp_path: Path) -> None:
     graph["edges"][0] = {"from": "no_dot", "to": "step.text"}
     pkg = _make_pkg(tmp_path / "pkg", graph=graph)
     with pytest.raises(ValidationError, match="Invalid address"):
+        validate_skill_package(pkg)
+
+
+def test_invalid_when_unknown_node(tmp_path: Path) -> None:
+    graph = minimal_graph()
+    graph["nodes"][0]["when"] = "ghost.result"
+    pkg = _make_pkg(tmp_path / "pkg", graph=graph)
+    with pytest.raises(ValidationError, match="when-condition references unknown node.*ghost"):
+        validate_skill_package(pkg)
+
+
+def test_invalid_when_unknown_input(tmp_path: Path) -> None:
+    graph = minimal_graph()
+    graph["nodes"][0]["when"] = "input.enabled"
+    pkg = _make_pkg(tmp_path / "pkg", graph=graph)
+    with pytest.raises(ValidationError, match="when-condition references undeclared input.*enabled"):
+        validate_skill_package(pkg)
+
+
+def test_when_dependency_participates_in_cycle_detection(tmp_path: Path) -> None:
+    graph = {
+        "version": 1,
+        "nodes": [
+            {"id": "a", "op": "template.render", "config": {"template": "{{x}}"}, "when": "b.rendered"},
+            {"id": "b", "op": "template.render", "config": {"template": "{{x}}"}},
+        ],
+        "edges": [
+            {"from": "input.text", "to": "a.x"},
+            {"from": "a.rendered", "to": "b.x"},
+        ],
+        "outputs": {"result": "b.rendered"},
+    }
+    pkg = _make_pkg(tmp_path / "pkg", graph=graph)
+    with pytest.raises(ValidationError, match="cycle"):
         validate_skill_package(pkg)
 
 

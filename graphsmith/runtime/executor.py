@@ -50,6 +50,7 @@ def run_skill_package(
     optional_inputs = {
         f.name for f in pkg.skill.inputs if not f.required
     }
+    skipped_nodes: set[str] = set()
 
     # 3. Topological execution
     order = topological_order(pkg)
@@ -57,10 +58,24 @@ def run_skill_package(
     try:
         for node_id in order:
             node = node_map[node_id]
+            should_run, skip_reason = _should_run_node(node, store)
+            if not should_run:
+                now = _now_iso()
+                skipped_nodes.add(node.id)
+                run_trace.nodes.append(NodeTrace(
+                    node_id=node.id,
+                    op=node.op,
+                    status="skipped",
+                    started_at=now,
+                    ended_at=now,
+                    error=skip_reason,
+                ))
+                continue
             _execute_node(
                 node, bindings[node_id], store, provider,
                 run_trace, registry, _depth, call_stack,
                 optional_inputs=optional_inputs,
+                skipped_nodes=skipped_nodes,
             )
     except (ExecutionError, OpError, RegistryError, NotImplementedError) as exc:
         run_trace.status = "error"
@@ -144,10 +159,12 @@ def _execute_node(
     call_stack: list[tuple[str, str]],
     *,
     optional_inputs: set[str] | None = None,
+    skipped_nodes: set[str] | None = None,
 ) -> None:
     """Resolve inputs, run op, store outputs, record trace."""
     started = _now_iso()
     _optional = optional_inputs or set()
+    _skipped = skipped_nodes or set()
 
     # Resolve bound addresses to actual values.
     # Bindings sourced from optional graph inputs that were not provided
@@ -158,6 +175,8 @@ def _execute_node(
             resolved_inputs[port] = store.get(address)
         elif address.startswith("input.") and address.split(".", 1)[1] in _optional:
             continue  # optional input not provided — skip
+        elif address.split(".", 1)[0] in _skipped:
+            continue  # upstream node skipped — omit the input port
         else:
             # Force the error for required/non-input addresses
             resolved_inputs[port] = store.get(address)
@@ -217,6 +236,23 @@ def _check_required_inputs_provided(pkg: SkillPackage, inputs: dict[str, Any]) -
             f"The graph declares these as required inputs but they were not "
             f"included in the input payload. Provided: {sorted(provided)}"
         )
+
+
+def _should_run_node(node: GraphNode, store: ValueStore) -> tuple[bool, str | None]:
+    """Evaluate node.when against the current store."""
+    if not node.when:
+        return True, None
+
+    negated = node.when.startswith("!")
+    address = node.when[1:] if negated else node.when
+    if not store.has(address):
+        return False, f"Condition '{node.when}' not available"
+
+    value = store.get(address)
+    active = not bool(value) if negated else bool(value)
+    if active:
+        return True, None
+    return False, f"Condition '{node.when}' evaluated false"
 
 
 def _summarise(data: dict[str, Any], max_str_len: int = 200) -> dict[str, Any]:

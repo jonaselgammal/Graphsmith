@@ -35,6 +35,13 @@ def topological_order(pkg: SkillPackage) -> list[str]:
                 if node.id not in adj[src_scope]:
                     adj[src_scope].add(node.id)
                     indegree[node.id] += 1
+        if node.when:
+            raw = node.when[1:] if node.when.startswith("!") else node.when
+            src_scope = raw.split(".", 1)[0]
+            if src_scope in node_ids and src_scope != node.id:
+                if node.id not in adj[src_scope]:
+                    adj[src_scope].add(node.id)
+                    indegree[node.id] += 1
 
     queue = sorted(nid for nid, deg in indegree.items() if deg == 0)
     order: list[str] = []

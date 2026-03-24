@@ -30,6 +30,12 @@ class TestInputTypeNormalization:
     def test_parameterized_types_preserved(self) -> None:
         assert _normalize_type("array<string>") == "array<string>"
         assert _normalize_type("optional<integer>") == "optional<integer>"
+        assert _normalize_type("union<string, integer>") == "union<string, integer>"
+        assert _normalize_type("record<object>") == "record<object>"
+
+    def test_structured_type_preserved(self) -> None:
+        structured = {"type": "object", "properties": {"name": "string"}}
+        assert _normalize_type(structured) == structured
 
     def test_json_input_type_compiles_and_validates(self) -> None:
         """The exact failure: LLM declares input type as 'json'."""
