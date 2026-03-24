@@ -71,10 +71,15 @@ class IRBlock(BaseModel):
 
     name: str
     kind: Literal["branch", "loop", "function"]
+    condition: IRSource | None = None
     collection: IRSource | None = None
     inputs: dict[str, IRSource] = Field(default_factory=dict)
     steps: list[IRStep] = Field(default_factory=list)
+    then_steps: list[IRStep] = Field(default_factory=list)
+    else_steps: list[IRStep] = Field(default_factory=list)
     final_outputs: dict[str, IROutputRef] = Field(default_factory=dict)
+    then_outputs: dict[str, IROutputRef] = Field(default_factory=dict)
+    else_outputs: dict[str, IROutputRef] = Field(default_factory=dict)
     max_items: int = 100
     config: dict[str, Any] = Field(default_factory=dict)
 

@@ -129,15 +129,48 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
             IRBlock(
                 name=block["name"],
                 kind=block["kind"],
+                condition=_normalize_source(block["condition"]) if "condition" in block else None,
                 collection=_normalize_source(block["collection"]) if "collection" in block else None,
                 inputs={
                     port: _normalize_source(src)
                     for port, src in block.get("inputs", {}).items()
                 },
                 steps=block_steps,
+                then_steps=[
+                    IRStep(
+                        name=step["name"],
+                        skill_id=step["skill_id"],
+                        version=step.get("version", "1.0.0"),
+                        sources={port: _normalize_source(src) for port, src in step.get("sources", {}).items()},
+                        config=step.get("config", {}),
+                        when=_normalize_source(step["when"]) if "when" in step else None,
+                        unless=bool(step.get("unless", False)),
+                    )
+                    for step in block.get("then_steps", [])
+                ],
+                else_steps=[
+                    IRStep(
+                        name=step["name"],
+                        skill_id=step["skill_id"],
+                        version=step.get("version", "1.0.0"),
+                        sources={port: _normalize_source(src) for port, src in step.get("sources", {}).items()},
+                        config=step.get("config", {}),
+                        when=_normalize_source(step["when"]) if "when" in step else None,
+                        unless=bool(step.get("unless", False)),
+                    )
+                    for step in block.get("else_steps", [])
+                ],
                 final_outputs=_normalize_final_outputs(
                     block.get("final_outputs", {}),
                     block_step_names,
+                ),
+                then_outputs=_normalize_final_outputs(
+                    block.get("then_outputs", {}),
+                    {step["name"] for step in block.get("then_steps", [])},
+                ),
+                else_outputs=_normalize_final_outputs(
+                    block.get("else_outputs", {}),
+                    {step["name"] for step in block.get("else_steps", [])},
                 ),
                 max_items=int(block.get("max_items", 100)),
                 config=block.get("config", {}),

@@ -498,3 +498,93 @@ class TestBoundedIteration:
 
         result = run_skill_package(pkg, {"items": ["a", "b"], "prefix": "item"})
         assert result.outputs == {"rendered": ["item:a", "item:b"]}
+
+
+class TestBranchBlocks:
+    def test_branch_block_executes_then_path(self) -> None:
+        ir = PlanningIR(
+            goal="branch format",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_branch",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[
+                        IRStep(
+                            name="then_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "then:{{text}}"},
+                        )
+                    ],
+                    else_steps=[
+                        IRStep(
+                            name="else_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "else:{{text}}"},
+                        )
+                    ],
+                    then_outputs={"rendered": IROutputRef(step="then_render", port="rendered")},
+                    else_outputs={"rendered": IROutputRef(step="else_render", port="rendered")},
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_branch", port="rendered")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        pkg = glue_to_skill_package(glue)
+        validate_skill_package(pkg)
+
+        result = run_skill_package(pkg, {"text": "x", "enabled": True})
+        assert result.outputs == {"rendered": "then:x"}
+        statuses = {node.node_id: node.status for node in result.trace.nodes}
+        assert statuses["format_branch_then_then_render"] == "ok"
+        assert statuses["format_branch_else_else_render"] == "skipped"
+
+    def test_branch_block_executes_else_path(self) -> None:
+        ir = PlanningIR(
+            goal="branch format",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_branch",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[
+                        IRStep(
+                            name="then_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "then:{{text}}"},
+                        )
+                    ],
+                    else_steps=[
+                        IRStep(
+                            name="else_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "else:{{text}}"},
+                        )
+                    ],
+                    then_outputs={"rendered": IROutputRef(step="then_render", port="rendered")},
+                    else_outputs={"rendered": IROutputRef(step="else_render", port="rendered")},
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_branch", port="rendered")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        pkg = glue_to_skill_package(glue)
+        validate_skill_package(pkg)
+
+        result = run_skill_package(pkg, {"text": "x", "enabled": False})
+        assert result.outputs == {"rendered": "else:x"}
+        statuses = {node.node_id: node.status for node in result.trace.nodes}
+        assert statuses["format_branch_then_then_render"] == "skipped"
+        assert statuses["format_branch_else_else_render"] == "ok"

@@ -338,6 +338,51 @@ class TestCompilerHappyPath:
         assert node.config["item_inputs"] == ["text"]
         assert glue.graph.outputs["normalized"] == "normalize_each.normalized"
 
+    def test_branch_block_lowers_to_guarded_steps_and_merge(self) -> None:
+        ir = PlanningIR(
+            goal="conditionally format",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_branch",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[
+                        IRStep(
+                            name="then_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "then:{{text}}"},
+                        )
+                    ],
+                    else_steps=[
+                        IRStep(
+                            name="else_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "else:{{text}}"},
+                        )
+                    ],
+                    then_outputs={"rendered": IROutputRef(step="then_render", port="rendered")},
+                    else_outputs={"rendered": IROutputRef(step="else_render", port="rendered")},
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_branch", port="rendered")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        ids = [node.id for node in glue.graph.nodes]
+        assert "format_branch_then_then_render" in ids
+        assert "format_branch_else_else_render" in ids
+        assert "format_branch_merge_rendered" in ids
+        node_map = {node.id: node for node in glue.graph.nodes}
+        assert node_map["format_branch_then_then_render"].when == "input.enabled"
+        assert node_map["format_branch_else_else_render"].when == "!input.enabled"
+        assert node_map["format_branch_merge_rendered"].op == "fallback.try"
+        assert glue.graph.outputs["rendered"] == "format_branch_merge_rendered.result"
+
 
 # ── Compiler error tests ───────────────────────────────────────────
 
@@ -492,16 +537,13 @@ class TestCompilerErrors:
             ],
             blocks=[
                 IRBlock(
-                    name="conditional",
-                    kind="branch",
-                    steps=[
-                        IRStep(name="inside", skill_id="text.summarize.v1"),
-                    ],
+                    name="local_fn",
+                    kind="function",
                 )
             ],
             final_outputs={"x": IROutputRef(step="call", port="normalized")},
         )
-        with pytest.raises(UnsupportedControlFlowError, match="branch"):
+        with pytest.raises(UnsupportedControlFlowError, match="function"):
             compile_ir(ir)
 
     def test_loop_block_requires_collection(self) -> None:
@@ -522,6 +564,32 @@ class TestCompilerErrors:
             final_outputs={"normalized": IROutputRef(step="loop_it", port="normalized")},
         )
         with pytest.raises(CompilerError, match="missing collection source"):
+            compile_ir(ir)
+
+    def test_branch_block_requires_matching_outputs(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="b",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[IRStep(name="t", skill_id="template.render",
+                                       sources={"text": IRSource(step="input", port="text")},
+                                       config={"template": "{{text}}"})],
+                    else_steps=[IRStep(name="e", skill_id="template.render",
+                                       sources={"text": IRSource(step="input", port="text")},
+                                       config={"template": "{{text}}"})],
+                    then_outputs={"rendered": IROutputRef(step="t", port="rendered")},
+                    else_outputs={"other": IROutputRef(step="e", port="rendered")},
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="b", port="rendered")},
+        )
+        with pytest.raises(CompilerError, match="identical keys"):
             compile_ir(ir)
 
     def test_compiler_error_has_phase(self) -> None:
@@ -630,6 +698,33 @@ class TestIRParser:
         assert ir.blocks[0].kind == "loop"
         assert ir.blocks[0].collection is not None
         assert ir.blocks[0].final_outputs["normalized"].step == "inner"
+
+    def test_parse_branch_block(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}, {"name": "enabled", "type": "boolean"}],
+            "steps": [],
+            "blocks": [
+                {
+                    "name": "format_branch",
+                    "kind": "branch",
+                    "condition": "input.enabled",
+                    "inputs": {"text": "input.text"},
+                    "then_steps": [
+                        {"name": "t", "skill_id": "template.render", "sources": {"text": "input.text"}, "config": {"template": "then:{{text}}"}}
+                    ],
+                    "else_steps": [
+                        {"name": "e", "skill_id": "template.render", "sources": {"text": "input.text"}, "config": {"template": "else:{{text}}"}}
+                    ],
+                    "then_outputs": {"rendered": "t.rendered"},
+                    "else_outputs": {"rendered": "e.rendered"},
+                }
+            ],
+            "final_outputs": {"rendered": {"step": "format_branch", "port": "rendered"}},
+        }
+        ir = parse_ir_output(json.dumps(data), goal="test")
+        assert ir.blocks[0].kind == "branch"
+        assert ir.blocks[0].condition is not None
+        assert ir.blocks[0].then_outputs["rendered"].step == "t"
 
     def test_parse_when_and_unless(self) -> None:
         data = {
