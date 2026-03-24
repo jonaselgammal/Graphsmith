@@ -171,6 +171,8 @@ Current scope:
 - enable aggregated named loop outputs when the graph references
   `parallel.map.<field>` rather than only `parallel.map.results`
 - rewrite stale loop output alias `mapped -> results`
+- align generic collection outputs like `results` / `mapped` to a named loop
+  output when the inner op contract makes that mapping deterministic
 
 This matters because saved plans and direct graph output can still contain
 legacy or partially-normalized loop contracts even when the semantic plan is
@@ -192,8 +194,26 @@ This is not yet a general repair loop. It still does not:
 - synthesize missing branch or loop bodies
 - recover from unknown skills or broad type mismatches
 - classify and patch arbitrary regions from full traces
-- guarantee user-intended output naming when the plan is semantically close but
-  contract fidelity is weak
+- guarantee user-intended output naming in the general case when the plan is
+  semantically close but the naming ambiguity is not deterministic
+
+## Output-contract repair
+
+Graphsmith now has a first bounded output-contract repair layer for loop-style
+plans.
+
+Current scope:
+- if a `parallel.map` wraps a single-output inner op and the outer graph exposes
+  a generic collection alias like `results` or `mapped`, the graph can rewrite
+  that to the named collected output (for example `normalized`)
+- if the graph already uses the right output name but still points at the
+  generic collection port, the graph can rewrite the final output address to the
+  named collected output
+
+This is intentionally narrow and structural:
+- it does not guess from the user prompt
+- it does not rename arbitrary unrelated outputs
+- it only fires when the inner loop body contract makes the mapping clear
 
 ## Future: structural repair loop
 

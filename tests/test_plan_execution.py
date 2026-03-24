@@ -287,6 +287,60 @@ class TestRunGlueGraph:
             "graph:normalize_all: enable aggregated outputs from nested skill output mapping",
         ]
 
+    def test_aligns_generic_parallel_map_output_name(self) -> None:
+        glue = GlueGraph(
+            goal="normalize strings",
+            inputs=[IOField(name="strings", type="array<string>")],
+            outputs=[IOField(name="results", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="normalize_all",
+                        op="parallel.map",
+                        config={"op": "text.normalize", "item_input": "text"},
+                    )
+                ],
+                edges=[{"from": "input.strings", "to": "normalize_all.items"}],
+                outputs={"results": "normalize_all.results"},
+            ),
+        )
+
+        exec_result = run_glue_graph(glue, {"strings": ["  Alice  ", " BOB "]})
+        assert exec_result.outputs == {"normalized": ["alice", "bob"]}
+        assert exec_result.repairs == [
+            "graph:normalize_all: enable aggregated named outputs for parallel.map",
+            "graph:normalize_all: align generic output 'results' to named output 'normalized'",
+        ]
+
+    def test_aligns_parallel_map_generic_port_to_named_output(self) -> None:
+        glue = GlueGraph(
+            goal="normalize strings",
+            inputs=[IOField(name="strings", type="array<string>")],
+            outputs=[IOField(name="normalized", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="normalize_all",
+                        op="parallel.map",
+                        config={"op": "text.normalize", "item_input": "text"},
+                    )
+                ],
+                edges=[{"from": "input.strings", "to": "normalize_all.items"}],
+                outputs={"normalized": "normalize_all.results"},
+            ),
+        )
+
+        exec_result = run_glue_graph(glue, {"strings": ["  Alice  ", " BOB "]})
+        assert exec_result.outputs == {"normalized": ["alice", "bob"]}
+        assert exec_result.repairs == [
+            "graph:normalize_all: enable aggregated named outputs for parallel.map",
+            "graph:normalize_all: align generic output 'normalized' to named output 'normalized'",
+        ]
+
 
 # ── save / load ──────────────────────────────────────────────────────
 

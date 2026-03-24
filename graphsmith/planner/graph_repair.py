@@ -4,8 +4,30 @@ from __future__ import annotations
 import re
 
 from graphsmith.constants import PRIMITIVE_OPS
+from graphsmith.models.common import IOField
 from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
 from graphsmith.planner.models import GlueGraph
+
+_GENERIC_COLLECTION_OUTPUTS = {"result", "results", "mapped"}
+_PRIMITIVE_OUTPUT_PORTS = {
+    "template.render": "rendered",
+    "json.parse": "parsed",
+    "select.fields": "selected",
+    "assert.check": "value",
+    "branch.if": "result",
+    "fallback.try": "result",
+    "llm.generate": "text",
+    "llm.extract": "extracted",
+    "array.map": "mapped",
+    "array.filter": "filtered",
+    "parallel.map": "results",
+    "text.normalize": "normalized",
+    "text.word_count": "count",
+    "text.reverse": "reversed",
+    "text.sort_lines": "sorted",
+    "text.remove_duplicates": "deduplicated",
+    "text.title_case": "titled",
+}
 
 
 def normalize_glue_graph_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str]]:
@@ -81,6 +103,9 @@ def normalize_glue_graph_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str
             repaired = _update_node_config(repaired, node.id, config)
 
         actions.extend(node_actions)
+
+    repaired, output_actions = _align_glue_output_contracts(repaired)
+    actions.extend(output_actions)
 
     return repaired, actions
 
@@ -248,6 +273,121 @@ def _collect_referenced_ports(glue: GlueGraph, node_id: str) -> set[str]:
             if address.startswith(prefix):
                 refs.add(address.split(".", 1)[1])
     return refs
+
+
+def _align_glue_output_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str]]:
+    output_name_by_node_port = {
+        address: name for name, address in glue.graph.outputs.items()
+    }
+    repaired = glue
+    actions: list[str] = []
+    node_map = {node.id: node for node in glue.graph.nodes}
+
+    for output_name, address in list(repaired.graph.outputs.items()):
+        if "." not in address:
+            continue
+        node_id, port = address.split(".", 1)
+        node = node_map.get(node_id)
+        if node is None or node.op != "parallel.map":
+            continue
+        if output_name == "result":
+            continue
+        if output_name not in _GENERIC_COLLECTION_OUTPUTS and port not in _GENERIC_COLLECTION_OUTPUTS:
+            continue
+        inferred = _infer_parallel_map_named_output(node)
+        if not inferred or inferred in _GENERIC_COLLECTION_OUTPUTS:
+            continue
+
+        if not node.config.get("aggregate_outputs"):
+            updated_config = dict(node.config)
+            updated_config["aggregate_outputs"] = True
+            repaired = _update_node_config(repaired, node.id, updated_config)
+            actions.append(
+                f"graph:{node.id}: enable aggregated named outputs for parallel.map"
+            )
+            node_map = {n.id: n for n in repaired.graph.nodes}
+            node = node_map[node_id]
+
+        new_name = inferred if output_name in _GENERIC_COLLECTION_OUTPUTS else output_name
+        new_address = f"{node_id}.{inferred}"
+        if output_name == new_name and address == new_address:
+            continue
+        if new_name != output_name and new_name in repaired.graph.outputs:
+            continue
+
+        repaired = _rewrite_graph_output(repaired, output_name, new_name, new_address)
+        actions.append(
+            f"graph:{node_id}: align generic output '{output_name}' to named output '{new_name}'"
+        )
+        node_map = {n.id: n for n in repaired.graph.nodes}
+
+    return repaired, actions
+
+
+def _rewrite_graph_output(
+    glue: GlueGraph,
+    old_name: str,
+    new_name: str,
+    new_address: str,
+) -> GlueGraph:
+    new_outputs: dict[str, str] = {}
+    for name, address in glue.graph.outputs.items():
+        if name == old_name:
+            new_outputs[new_name] = new_address
+        else:
+            new_outputs[name] = address
+
+    output_fields: list[IOField] = []
+    for field in glue.outputs:
+        if field.name == old_name:
+            output_fields.append(field.model_copy(update={"name": new_name}))
+        else:
+            output_fields.append(field)
+
+    return glue.model_copy(
+        update={
+            "outputs": output_fields,
+            "graph": GraphBody(
+                version=glue.graph.version,
+                nodes=list(glue.graph.nodes),
+                edges=list(glue.graph.edges),
+                outputs=new_outputs,
+            ),
+        }
+    )
+
+
+def _infer_parallel_map_named_output(node: GraphNode) -> str | None:
+    config = node.config
+    output_port = config.get("output_port")
+    if isinstance(output_port, str) and output_port and output_port not in _GENERIC_COLLECTION_OUTPUTS:
+        return output_port
+
+    op = config.get("op")
+    if isinstance(op, str) and op in _PRIMITIVE_OUTPUT_PORTS:
+        return _PRIMITIVE_OUTPUT_PORTS[op]
+
+    if op == "skill.invoke":
+        op_config = config.get("op_config")
+        if isinstance(op_config, dict):
+            output_mapping = op_config.get("output_mapping")
+            if isinstance(output_mapping, dict) and len(output_mapping) == 1:
+                mapped_name = next(iter(output_mapping))
+                if isinstance(mapped_name, str) and mapped_name:
+                    return mapped_name
+
+    if op == "__inline_graph__":
+        body = config.get("body")
+        if isinstance(body, dict):
+            outputs = body.get("outputs")
+            if isinstance(outputs, list) and len(outputs) == 1:
+                first = outputs[0]
+                if isinstance(first, dict):
+                    name = first.get("name")
+                    if isinstance(name, str) and name:
+                        return name
+
+    return None
 
 
 def _lift_parallel_map_operation(config: dict[str, object], operation: str) -> None:
