@@ -469,6 +469,68 @@ class TestClosedLoopOrchestration:
         assert not result.success
         assert result.stopped_reason == "replan_failed"
 
+    def test_multi_stage_fallback_stays_off_for_loop_goal(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.uppercase.v1"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "For each text, normalize it and convert it to uppercase",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert not result.success
+        assert result.stopped_reason == "replan_failed"
+
+    def test_multi_stage_fallback_stays_off_for_multiple_generated_intents(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.starts_with.v1"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Check whether normalized text both starts with a prefix and ends with a suffix",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert not result.success
+        assert result.stopped_reason == "replan_failed"
+
     def test_multi_stage_fallback_handles_generated_predicate_input(self) -> None:
         class AlwaysFailBackend:
             _candidate_count = 1

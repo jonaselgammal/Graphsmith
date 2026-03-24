@@ -412,15 +412,8 @@ def extract_spec(goal: str) -> SkillSpec:
                 f"This prototype supports simple deterministic text/math/JSON ops only."
             )
 
-    # Match against template catalog (prefer exact substring, then longest subsequence)
-    best_key: str | None = None
-    best_score = 0
-    for key, tmpl in _TEMPLATES.items():
-        for kw in tmpl["keywords"]:
-            score = _keyword_match_score(goal_lower, goal_tokens, kw)
-            if score > best_score:
-                best_key = key
-                best_score = score
+    matches = match_template_keys(goal)
+    best_key = matches[0] if matches else None
 
     if best_key is None:
         goal_words = set(re.findall(r"[a-z]+", goal_lower))
@@ -438,6 +431,21 @@ def extract_spec(goal: str) -> SkillSpec:
         )
 
     return _spec_from_template(best_key, goal)
+
+
+def match_template_keys(goal: str) -> list[str]:
+    """Return matching template keys ordered from strongest to weakest match."""
+    goal_lower = goal.lower().strip()
+    goal_tokens = re.findall(r"[a-z0-9]+", goal_lower)
+    scored: list[tuple[int, str]] = []
+    for key, tmpl in _TEMPLATES.items():
+        best_score = 0
+        for kw in tmpl["keywords"]:
+            best_score = max(best_score, _keyword_match_score(goal_lower, goal_tokens, kw))
+        if best_score > 0:
+            scored.append((best_score, key))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [key for _, key in scored]
 
 
 def _keyword_match_score(goal_lower: str, goal_tokens: list[str], keyword: str) -> int:

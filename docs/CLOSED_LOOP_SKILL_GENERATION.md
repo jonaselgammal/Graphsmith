@@ -125,6 +125,9 @@ explicit. Common stop reasons are:
   `strip_prefix`, and `strip_suffix` now expose their variable arguments as
   real graph inputs instead of opaque config values, so they can participate in
   composition and future repair more naturally.
+- Bounded fallbacks are now stricter about semantic overclaiming:
+  loop-shaped goals and goals that clearly need multiple generated skills no
+  longer get marked as success just because a smaller executable graph exists.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of

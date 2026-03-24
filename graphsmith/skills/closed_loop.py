@@ -21,6 +21,7 @@ from graphsmith.skills.autogen import (
     extract_spec,
     format_result,
     generate_skill_files,
+    match_template_keys,
     register_generated_op,
     unregister_generated_op,
     validate_and_test,
@@ -186,6 +187,15 @@ def _can_use_generated_in_composition(spec: SkillSpec) -> bool:
     return True
 
 
+def _goal_has_loop_semantics(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return "for each " in goal_lower or goal_lower.startswith("for each") or " each " in goal_lower
+
+
+def _goal_needs_multiple_generated_skills(goal: str) -> bool:
+    return len(match_template_keys(goal)) > 1
+
+
 def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
     """Build a deterministic one-node plan for a generated skill."""
     from graphsmith.models.common import IOField
@@ -319,6 +329,10 @@ def _build_multi_stage_fallback_plan(
     - extract_keywords -> uppercase
     """
     if not _can_use_generated_in_composition(generated_spec):
+        return None
+    if _goal_has_loop_semantics(goal):
+        return None
+    if _goal_needs_multiple_generated_skills(goal):
         return None
 
     # Keep this bounded to text pipelines for now. Math/JSON mixed chains need
