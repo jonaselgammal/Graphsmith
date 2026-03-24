@@ -13,7 +13,7 @@ Supports **deterministic, single-step** skills across 7 template families:
 | text_config_predicate | starts_with, ends_with, contains | Text checks with config |
 | text_config_transform | replace, strip_prefix, strip_suffix | Text transforms with config |
 | math_binary | subtract, divide | Two-number arithmetic |
-| math_list | min, max | Aggregate over number lists |
+| math_list | min, max, median | Aggregate over number lists |
 | json_accessor | get_key, keys, pretty | JSON data access |
 | json_predicate | has_key | JSON property checks |
 
@@ -112,3 +112,9 @@ python scripts/run_autogen_battery.py
 ```
 
 See [Autogen Battery](AUTOGEN_BATTERY.md) for details.
+
+For the bounded closed-loop CLI surface, also run:
+
+```bash
+./scripts/autogen_closed_loop_smoke.sh
+```

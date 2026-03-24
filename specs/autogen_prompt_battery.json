@@ -6,7 +6,19 @@
     "must_contain": ["Skill: text.uppercase.v1", "Validation: PASS"]
   },
   {
+    "goal": "convert this text to all caps",
+    "expected": "pass",
+    "template_key": "uppercase",
+    "must_contain": ["Skill: text.uppercase.v1", "Validation: PASS"]
+  },
+  {
     "goal": "compute the median of numbers",
+    "expected": "pass",
+    "template_key": "median",
+    "must_contain": ["Skill: math.median.v1", "Validation: PASS"]
+  },
+  {
+    "goal": "find the middle value of numbers",
     "expected": "pass",
     "template_key": "median",
     "must_contain": ["Skill: math.median.v1", "Validation: PASS"]
@@ -18,12 +30,28 @@
     "must_contain": ["Skill: json.has_key.v1", "Validation: PASS"]
   },
   {
+    "goal": "check whether this json key exists",
+    "expected": "pass",
+    "template_key": "has_key",
+    "must_contain": ["Skill: json.has_key.v1", "Validation: PASS"]
+  },
+  {
     "goal": "fetch data from http API",
     "expected": "out_of_scope",
     "must_contain": ["Out of scope"]
   },
   {
+    "goal": "download json over http",
+    "expected": "out_of_scope",
+    "must_contain": ["Out of scope"]
+  },
+  {
     "goal": "frobnicate the gizmo",
+    "expected": "no_match",
+    "must_contain": ["Could not match goal"]
+  },
+  {
+    "goal": "make this dataset feel more organized",
     "expected": "no_match",
     "must_contain": ["Could not match goal"]
   }

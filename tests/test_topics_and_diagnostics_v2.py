@@ -147,6 +147,7 @@ class TestScripts:
         "eval_canonical.sh",
         "release_smoke.sh",
         "run_autogen_battery.py",
+        "autogen_closed_loop_smoke.sh",
     ])
     def test_exists_and_executable(self, script: str) -> None:
         import os
@@ -173,3 +174,9 @@ class TestScripts:
     def test_autogen_battery_references_manifest(self) -> None:
         content = (SCRIPTS_DIR / "run_autogen_battery.py").read_text()
         assert "autogen_prompt_battery.json" in content
+
+    def test_closed_loop_smoke_uses_echo_provider(self) -> None:
+        content = (SCRIPTS_DIR / "autogen_closed_loop_smoke.sh").read_text()
+        assert "solve" in content
+        assert "--provider echo" in content
+        assert "Stopped: replan_failed" in content
