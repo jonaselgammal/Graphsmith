@@ -4,6 +4,6 @@
   "tier": 3,
   "tags": ["loop", "json", "text", "generated"],
   "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected"],
+  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed"],
   "notes": "Loop plus cross-domain composition around a generated transform."
 }

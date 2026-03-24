@@ -19,6 +19,9 @@ from graphsmith.evaluation.frontier_eval import (
 from graphsmith.registry.local import LocalRegistry
 from graphsmith.skills.autogen import SkillSpec
 from graphsmith.skills.closed_loop import ClosedLoopResult
+from graphsmith.models.common import IOField
+from graphsmith.models.graph import GraphBody, GraphNode
+from graphsmith.planner.models import GlueGraph
 
 
 FRONTIER_DIR = Path(__file__).resolve().parent.parent / "evaluation" / "frontier_goals"
@@ -78,6 +81,18 @@ def test_eval_frontier_cli_json(monkeypatch, tmp_path: Path) -> None:
     )
 
     def fake_run_closed_loop(goal, backend, registry, *, output_dir=None, auto_approve=False, confirm_fn=None):
+        graph = GlueGraph(
+            goal=goal,
+            inputs=[IOField(name="numbers", type="array<number>")],
+            outputs=[IOField(name="median", type="number")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[GraphNode(id="s1", op="skill.invoke", config={"skill_id": "math.median.v1"})],
+                edges=[],
+                outputs={"median": "s1.median"},
+            ),
+        )
         return ClosedLoopResult(
             initial_status="failure",
             detected_missing=True,
@@ -95,6 +110,7 @@ def test_eval_frontier_cli_json(monkeypatch, tmp_path: Path) -> None:
                 examples=[{"input": {"numbers": "1\n2\n3"}, "output": {"median": "2"}}],
             ),
             replan_status="success",
+            replan_plan=graph,
             stopped_reason="replan_succeeded",
             success=True,
         )
@@ -138,3 +154,97 @@ def test_evaluate_frontier_case_isolates_registry_per_case(monkeypatch) -> None:
 
     assert seen_roots
     assert seen_roots[0] != str(registry.root)
+
+
+def test_evaluate_frontier_case_checks_structure(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = LocalRegistry(tmpdir)
+
+        def fake_run_closed_loop(goal, backend, registry, *, output_dir=None, auto_approve=False, confirm_fn=None):
+            graph = GlueGraph(
+                goal=goal,
+                inputs=[IOField(name="text", type="string")],
+                outputs=[IOField(name="uppercased", type="string")],
+                effects=["pure"],
+                graph=GraphBody(
+                    version=1,
+                    nodes=[GraphNode(id="s1", op="skill.invoke", config={"skill_id": "text.uppercase.v1"})],
+                    edges=[],
+                    outputs={"uppercased": "s1.uppercased"},
+                ),
+            )
+            return ClosedLoopResult(
+                initial_status="failure",
+                replan_status="success",
+                replan_plan=graph,
+                stopped_reason="multi_stage_fallback_succeeded",
+                success=True,
+            )
+
+        monkeypatch.setattr("graphsmith.evaluation.frontier_eval.run_closed_loop", fake_run_closed_loop)
+
+        case = FrontierCase(
+            id="x",
+            goal="normalize and uppercase",
+            expected_success=True,
+            required_skill_ids=["text.normalize.v1", "text.uppercase.v1"],
+            min_node_count=2,
+        )
+        result = evaluate_frontier_case(case, registry, backend=object())
+
+    assert result.status == "fail"
+    assert not result.structural_pass
+    assert "missing_required_skill:text.normalize.v1" in result.structural_failures
+
+
+def test_evaluate_frontier_case_checks_required_inputs(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = LocalRegistry(tmpdir)
+
+        def fake_run_closed_loop(goal, backend, registry, *, output_dir=None, auto_approve=False, confirm_fn=None):
+            graph = GlueGraph(
+                goal=goal,
+                inputs=[IOField(name="text", type="string"), IOField(name="prefix", type="string")],
+                outputs=[IOField(name="result", type="string")],
+                effects=["pure"],
+                graph=GraphBody(
+                    version=1,
+                    nodes=[GraphNode(id="s1", op="skill.invoke", config={"skill_id": "text.starts_with.v1"})],
+                    edges=[],
+                    outputs={"result": "s1.result"},
+                ),
+            )
+            return ClosedLoopResult(
+                initial_status="failure",
+                replan_status="success",
+                replan_plan=graph,
+                stopped_reason="multi_stage_fallback_succeeded",
+                success=True,
+                generated_spec=SkillSpec(
+                    skill_id="text.starts_with.v1",
+                    op_name="text.starts_with",
+                    category="text",
+                    short_name="starts_with",
+                    human_name="Starts With",
+                    description="Check if text starts with a prefix value.",
+                    template_key="starts_with",
+                    family="text_binary_predicate",
+                    inputs=[{"name": "text", "type": "string"}, {"name": "prefix", "type": "string"}],
+                    outputs=[{"name": "result", "type": "string"}],
+                    examples=[{"input": {"text": "hello", "prefix": "he"}, "output": {"result": "true"}}],
+                ),
+            )
+
+        monkeypatch.setattr("graphsmith.evaluation.frontier_eval.run_closed_loop", fake_run_closed_loop)
+
+        case = FrontierCase(
+            id="y",
+            goal="starts with prefix",
+            expected_success=True,
+            required_graph_inputs=["prefix"],
+            require_generated_skill=True,
+        )
+        result = evaluate_frontier_case(case, registry, backend=object())
+
+    assert result.status == "pass"
+    assert result.structural_pass

@@ -4,6 +4,6 @@
   "tier": 3,
   "tags": ["text", "llm", "generated", "multi_stage"],
   "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected"],
+  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed"],
   "notes": "Four-stage plan requiring more than the current bounded linear fallback."
 }
