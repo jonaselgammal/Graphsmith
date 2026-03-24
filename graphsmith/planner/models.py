@@ -69,3 +69,4 @@ class PlanResult(BaseModel):
     reasoning: str = ""
     candidates_considered: list[str] = Field(default_factory=list)
     retrieval: RetrievalDiagnostics | None = None
+    repair_actions: list[str] = Field(default_factory=list)

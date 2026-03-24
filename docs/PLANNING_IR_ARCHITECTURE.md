@@ -89,7 +89,9 @@ All errors inherit from `CompilerError(phase, details)`:
 | `SelfLoopError` | Step sources from itself |
 | `CycleError` | Step dependencies form a cycle |
 
-Each error carries `phase` and `details` for future repair loop support.
+Each error carries `phase` and `details` so the planner can classify
+where a failure happened and, for some block-local issues, attempt a
+deterministic repair.
 
 ### IR Prompt (`graphsmith/planner/ir_prompt.py`)
 
@@ -125,9 +127,40 @@ Drop-in replacement for `LLMPlannerBackend` — same interface, different pipeli
 - Evaluation harness
 - All existing tests
 
-## Future: repair loop
+## Deterministic local repair
 
-The structured `CompilerError` types (with `phase` and `details`) are designed
-to support a future repair loop where compiler errors are fed back to the LLM
-for correction. This is NOT implemented yet — this sprint builds the clean
-foundation first.
+Graphsmith now includes a narrow local repair pass between IR parsing and
+final compiler failure.
+
+Current scope:
+- branch blocks with missing or incomplete `then_outputs` / `else_outputs`
+- loop blocks with missing `final_outputs`
+- loop blocks with exactly one body input but no explicit `$item` binding
+
+Repair is intentionally bounded:
+- no extra LLM call
+- no whole-plan regeneration
+- only patch the failing block
+- only when the missing contract can be inferred from surrounding references
+
+Examples:
+- if a top-level output references `format_branch.rendered` and the branch arms
+  omit output declarations, the repair pass can map `rendered` to the terminal
+  step of each arm
+- if a loop block is referenced as `normalize_each.normalized` and its body ends
+  in `normalize`, the repair pass can infer `final_outputs.normalized =
+  normalize.normalized`
+
+This is not yet a general repair loop. It does not:
+- fix arbitrary bad dataflow
+- synthesize missing branch bodies
+- recover from unknown skills or type mismatches
+- use runtime traces to repair plans
+
+## Future: structural repair loop
+
+The next layer is a real structural repair loop:
+- classify compiler/runtime failures by region
+- patch one branch or loop body instead of replanning the whole graph
+- optionally use LLM-guided edits when deterministic repair is insufficient
+- feed trace evidence back into repair decisions

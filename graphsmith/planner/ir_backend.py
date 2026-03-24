@@ -17,6 +17,7 @@ from graphsmith.planner.decomposition import (
 from graphsmith.planner.ir import PlanningIR
 from graphsmith.planner.ir_parser import IRParseError, parse_ir_output
 from graphsmith.planner.ir_prompt import build_ir_planning_context, get_ir_system_message
+from graphsmith.planner.repair import normalize_ir_contracts, repair_ir_locally
 from graphsmith.planner.ir_scorer import ScoreBreakdown, score_candidate
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult, UnresolvedHole
 
@@ -30,6 +31,7 @@ class CandidateResult(BaseModel):
     glue: GlueGraph | None = None
     score: ScoreBreakdown | None = None
     error: str = ""
+    repairs: list[str] = Field(default_factory=list)
 
 
 class IRPlannerBackend:
@@ -111,7 +113,7 @@ class IRPlannerBackend:
                 reasoning=f"Raw output: {raw[:200]}", candidates_considered=cand_ids,
             )
 
-        glue, err = self._compile(ir)
+        glue, err, repairs = self._compile(ir)
         if err:
             return PlanResult(
                 status="failure", holes=[err],
@@ -121,6 +123,7 @@ class IRPlannerBackend:
         return PlanResult(
             status="success", graph=glue,
             reasoning=ir.reasoning, candidates_considered=cand_ids,
+            repair_actions=repairs,
         )
 
     def _compose_reranked(
@@ -152,6 +155,7 @@ class IRPlannerBackend:
                 graph=best.glue,
                 reasoning=" | ".join(p for p in reasoning_parts if p),
                 candidates_considered=cand_ids,
+                repair_actions=best.repairs,
             )
 
         errors = [c.error for c in candidates if c.error]
@@ -200,7 +204,7 @@ class IRPlannerBackend:
                 index=index, status="parse_error", error=str(err.description),
             )
 
-        glue, err = self._compile(ir)
+        glue, err, repairs = self._compile(ir)
         if err:
             return CandidateResult(
                 index=index, status="compile_error", ir=ir, error=str(err.description),
@@ -208,7 +212,12 @@ class IRPlannerBackend:
 
         score = score_candidate(ir, goal, decomposition=decomp)
         return CandidateResult(
-            index=index, status="compiled", ir=ir, glue=glue, score=score,
+            index=index,
+            status="compiled",
+            ir=ir,
+            glue=glue,
+            score=score,
+            repairs=repairs,
         )
 
     # ── Helper methods ─────────────────────────────────────────────
@@ -241,15 +250,34 @@ class IRPlannerBackend:
                 description=f"Failed to parse IR: {exc}",
             )
 
-    def _compile(self, ir: PlanningIR) -> tuple[GlueGraph | None, UnresolvedHole | None]:
+    def _compile(self, ir: PlanningIR) -> tuple[GlueGraph | None, UnresolvedHole | None, list[str]]:
+        normalized = normalize_ir_contracts(ir)
+        ir = normalized.ir
+        repair_actions = [
+            f"{action.target}: {action.action}"
+            for action in normalized.actions
+        ]
         try:
             glue = compile_ir(ir)
-            return glue, None
+            return glue, None, repair_actions
         except CompilerError as exc:
+            repaired = repair_ir_locally(ir, exc)
+            if repaired.actions:
+                try:
+                    glue = compile_ir(repaired.ir)
+                    return glue, None, [
+                        *repair_actions,
+                        *[
+                            f"{action.target}: {action.action}"
+                            for action in repaired.actions
+                        ],
+                    ]
+                except CompilerError:
+                    pass
             return None, UnresolvedHole(
                 node_id="(compiler)", kind="validation_error",
                 description=f"Compiler error ({exc.phase}): {exc}",
-            )
+            ), repair_actions
 
 
 def _decomp_contract_section(decomp: SemanticDecomposition) -> str:

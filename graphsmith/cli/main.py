@@ -456,6 +456,11 @@ def plan(
         for c in result.candidates_considered:
             typer.echo(f"  - {c}")
 
+    if result.repair_actions:
+        typer.echo(f"\nRepairs applied ({len(result.repair_actions)}):")
+        for action in result.repair_actions:
+            typer.echo(f"  - {action}")
+
     if show_retrieval and result.retrieval:
         typer.echo(
             f"\nRetrieval [{result.retrieval.mode}] "
