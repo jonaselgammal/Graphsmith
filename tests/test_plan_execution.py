@@ -22,6 +22,8 @@ from graphsmith.planner import (
     run_glue_graph,
     save_plan,
 )
+from graphsmith.planner.compiler import compile_ir
+from graphsmith.planner.ir import IRBlock, IRInput, IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.composer import glue_to_skill_package
 from graphsmith.planner.graph_repair import (
     normalize_glue_graph_contracts,
@@ -244,6 +246,72 @@ class TestRunGlueGraph:
             "graph:map: enable aggregated named outputs for parallel.map",
             "runtime:map: rewrite result output references to results",
         ]
+
+    def test_runtime_trace_regenerates_loop_region(self) -> None:
+        ir = PlanningIR(
+            goal="format each item",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[
+                        IRStep(
+                            name="render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "{{text}}"},
+                        )
+                    ],
+                    final_outputs={"rendered": IROutputRef(step="render", port="rendered")},
+                    max_items=10,
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_each", port="rendered")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        loop_node = glue.graph.nodes[0]
+        broken_config = dict(loop_node.config)
+        broken_config["item_inputs"] = ["missing"]
+        glue = glue.model_copy(
+            update={
+                "graph": GraphBody(
+                    version=glue.graph.version,
+                    nodes=[loop_node.model_copy(update={"config": broken_config})],
+                    edges=list(glue.graph.edges),
+                    outputs=dict(glue.graph.outputs),
+                )
+            }
+        )
+
+        repaired_block = json.dumps({
+            "block": ir.blocks[0].model_dump(mode="json")
+        })
+
+        class RepairProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: Any) -> str:
+                self.calls += 1
+                return repaired_block
+
+        provider = RepairProvider()
+        exec_result = run_glue_graph(
+            glue,
+            {"items": ["a", "b"]},
+            llm_provider=provider,  # type: ignore[arg-type]
+        )
+        assert exec_result.outputs == {"rendered": ["a", "b"]}
+        assert exec_result.repairs == [
+            "graph:format_each: enable aggregated named outputs for parallel.map",
+            "runtime:format_each: regenerated loop region from runtime trace"
+        ]
+        assert provider.calls == 1
 
     def test_normalizes_nested_parallel_map_skill_target(self, tmp_path: Path) -> None:
         reg = LocalRegistry(root=tmp_path / "reg")

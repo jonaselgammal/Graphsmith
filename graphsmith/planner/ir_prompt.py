@@ -412,3 +412,70 @@ def build_ir_block_repair_context(
     lines.append("- Return the full repaired block object, not just a diff.")
     lines.append("- Do not include any prose.")
     return "\n".join(lines)
+
+
+def build_ir_runtime_block_repair_context(
+    *,
+    goal: str,
+    block: IRBlock,
+    runtime_error: str,
+    failing_node_id: str,
+    trace_summary: dict[str, object],
+    available_skills: list[dict[str, object]],
+) -> str:
+    """Build a focused prompt to repair one block from runtime evidence."""
+    lines: list[str] = []
+    lines.append(f"[graphsmith-block-repair-prompt {IR_BLOCK_REPAIR_PROMPT_VERSION}]\n")
+    lines.append(f"# Goal\n{goal}\n")
+    lines.append("# Task")
+    lines.append(
+        f"Repair ONLY the block named '{block.name}' of kind '{block.kind}' based on runtime failure evidence. "
+        "Do not rewrite unrelated regions."
+    )
+    lines.append("")
+    lines.append("# Runtime failure")
+    lines.append(f"- failing lowered node: {failing_node_id}")
+    lines.append(f"- error: {runtime_error}")
+    lines.append("")
+    lines.append("# Trace summary")
+    lines.append("```json")
+    lines.append(json.dumps(trace_summary, indent=2))
+    lines.append("```")
+    lines.append("")
+    lines.append("# Block contract")
+    lines.append(f"- name must stay: {block.name}")
+    lines.append(f"- kind must stay: {block.kind}")
+    if block.kind == "loop":
+        lines.append("- preserve loop semantics: collection, steps, final_outputs, max_items")
+        lines.append("- at least one loop body input must bind to $item")
+    if block.kind == "branch":
+        lines.append("- preserve branch semantics: condition, then_steps, else_steps, then_outputs, else_outputs")
+        lines.append("- then_outputs and else_outputs must declare identical keys")
+    lines.append("")
+    lines.append("# Available skills")
+    if not available_skills:
+        lines.append("(none — use primitive ops only)\n")
+    else:
+        for entry in available_skills:
+            ins = ", ".join(entry.get("inputs", [])) or "(none)"
+            outs = ", ".join(entry.get("outputs", [])) or "(none)"
+            effs = ", ".join(entry.get("effects", [])) or "pure"
+            lines.append(
+                f"- {entry['id']}@{entry['version']}: {entry['description']}\n"
+                f"  inputs: [{ins}]  output_ports: [{outs}]  effects: [{effs}]"
+            )
+        lines.append("")
+    lines.append(f"# Allowed primitive ops\n{', '.join(sorted(PRIMITIVE_OPS))}\n")
+    lines.append("# Current block JSON")
+    lines.append("```json")
+    lines.append(json.dumps(block.model_dump(mode="json"), indent=2))
+    lines.append("```")
+    lines.append("")
+    lines.append("# Required response format")
+    lines.append("Respond with ONLY this JSON shape:")
+    lines.append("```json")
+    lines.append('{"block": {...}}')
+    lines.append("```")
+    lines.append("- Return the full repaired block object, not just a diff.")
+    lines.append("- Do not include any prose.")
+    return "\n".join(lines)

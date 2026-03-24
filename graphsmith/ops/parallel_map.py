@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from graphsmith.exceptions import OpError
+from graphsmith.exceptions import ExecutionError, OpError
 from graphsmith.traces.models import NodeTrace, RunTrace, _now_iso
 
 DEFAULT_MAX_ITEMS = 100
@@ -132,7 +132,7 @@ def parallel_map(
             else:
                 op_fn = _PURE_OPS[inner_op]
                 out = op_fn(op_config, inner_inputs)
-        except OpError as exc:
+        except (OpError, ExecutionError) as exc:
             if trace is not None:
                 trace.nodes.append(NodeTrace(
                     node_id=f"item_{i}",
@@ -147,7 +147,8 @@ def parallel_map(
                 trace.error = str(exc)
                 trace.ended_at = _now_iso()
             raise OpError(
-                f"parallel.map: inner op '{inner_op}' failed on item {i}: {exc}"
+                f"parallel.map: inner op '{inner_op}' failed on item {i}: {exc}",
+                trace=trace,
             ) from exc
         results.append(out)
         for key, value in out.items():

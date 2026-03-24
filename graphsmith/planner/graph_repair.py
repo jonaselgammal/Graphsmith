@@ -2,11 +2,31 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from graphsmith.constants import PRIMITIVE_OPS
+from graphsmith.ops.llm_provider import LLMProvider
 from graphsmith.models.common import IOField
 from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+from graphsmith.planner.compiler import (
+    InvalidBranchBlockError,
+    InvalidLoopBlockError,
+    _apply_name_map,
+    _build_edges,
+    _build_graph_outputs,
+    _build_name_map,
+    _build_nodes,
+    _lower_branch_block,
+    _lower_loop_block,
+)
+from graphsmith.planner.ir import IRBlock, IROutputRef, PlanningIR
+from graphsmith.planner.ir_parser import IRParseError, parse_ir_block_output
+from graphsmith.planner.ir_prompt import (
+    build_ir_runtime_block_repair_context,
+    get_ir_block_repair_system_message,
+)
 from graphsmith.planner.models import GlueGraph
+from graphsmith.traces.models import NodeTrace, RunTrace
 
 _GENERIC_COLLECTION_OUTPUTS = {"result", "results", "mapped"}
 _PRIMITIVE_OUTPUT_PORTS = {
@@ -184,6 +204,72 @@ def repair_glue_graph_from_runtime_error(
     return repaired, actions
 
 
+def repair_glue_graph_from_runtime_trace(
+    glue: GlueGraph,
+    error_text: str,
+    *,
+    trace: RunTrace | None,
+    llm_provider: LLMProvider | None,
+    registry: object | None = None,
+) -> tuple[GlueGraph, list[str]]:
+    """Attempt one LLM-guided region repair from runtime trace evidence."""
+    if trace is None or llm_provider is None:
+        return glue, []
+
+    failed_trace = _find_failed_top_level_trace(trace)
+    if failed_trace is None:
+        return glue, []
+
+    graph_node = next((node for node in glue.graph.nodes if node.id == failed_trace.node_id), None)
+    if graph_node is None:
+        return glue, []
+
+    region = graph_node.config.get("__graphsmith_region__")
+    if not isinstance(region, dict):
+        return glue, []
+
+    raw_block = region.get("block")
+    if not isinstance(raw_block, dict):
+        return glue, []
+
+    try:
+        block = IRBlock.model_validate(raw_block)
+    except Exception:
+        return glue, []
+
+    prompt = build_ir_runtime_block_repair_context(
+        goal=glue.goal,
+        block=block,
+        runtime_error=error_text,
+        failing_node_id=failed_trace.node_id,
+        trace_summary=_trace_summary_dict(failed_trace),
+        available_skills=_registry_skill_summaries(registry),
+    )
+    try:
+        raw = llm_provider.generate(
+            prompt,
+            system=get_ir_block_repair_system_message(),
+            json_mode=True,
+        )
+    except Exception:
+        return glue, []
+
+    try:
+        repaired_block = parse_ir_block_output(raw)
+    except IRParseError:
+        return glue, []
+
+    if repaired_block.name != block.name or repaired_block.kind != block.kind:
+        return glue, []
+
+    repaired_glue = _replace_runtime_region(glue, repaired_block)
+    if repaired_glue is None:
+        return glue, []
+    return repaired_glue, [
+        f"runtime:{block.name}: regenerated {block.kind} region from runtime trace"
+    ]
+
+
 def _rewrite_node_port_alias(
     glue: GlueGraph,
     node_id: str,
@@ -246,6 +332,54 @@ def _update_node_config(
     )
 
 
+def _replace_runtime_region(
+    glue: GlueGraph,
+    block: IRBlock,
+) -> GlueGraph | None:
+    try:
+        steps, block_outputs = _lower_block_fragment(block, glue)
+    except (InvalidLoopBlockError, InvalidBranchBlockError):
+        return None
+
+    fragment_ir = PlanningIR(
+        goal=glue.goal,
+        inputs=[],
+        steps=steps,
+        final_outputs={
+            name: IROutputRef(step=source.step or "", port=source.port or "")
+            for (block_name, name), source in block_outputs.items()
+            if block_name == block.name and source.step and source.port
+        },
+        effects=glue.effects,
+    )
+    name_map = _build_name_map(fragment_ir)
+    fragment_ir = _apply_name_map(fragment_ir, name_map)
+    new_nodes = _build_nodes(fragment_ir)
+    new_edges = _build_edges(fragment_ir)
+
+    remove_ids = _runtime_region_node_ids(glue, block.name, block.kind)
+    filtered_nodes = [node for node in glue.graph.nodes if node.id not in remove_ids]
+    filtered_edges = [
+        edge for edge in glue.graph.edges
+        if edge.to.split(".", 1)[0] not in remove_ids
+        and not (
+            edge.from_.split(".", 1)[0] in remove_ids
+            and edge.to.split(".", 1)[0] in remove_ids
+        )
+    ]
+
+    return glue.model_copy(
+        update={
+            "graph": GraphBody(
+                version=glue.graph.version,
+                nodes=[*filtered_nodes, *new_nodes],
+                edges=[*filtered_edges, *new_edges],
+                outputs=dict(glue.graph.outputs),
+            )
+        }
+    )
+
+
 def _rewrite_node_input_alias(
     glue: GlueGraph,
     node_id: str,
@@ -298,6 +432,82 @@ def _collect_referenced_ports(glue: GlueGraph, node_id: str) -> set[str]:
             if address.startswith(prefix):
                 refs.add(address.split(".", 1)[1])
     return refs
+
+
+def _find_failed_top_level_trace(trace: RunTrace) -> NodeTrace | None:
+    for node in reversed(trace.nodes):
+        if node.status == "error":
+            return node
+    return None
+
+
+def _trace_summary_dict(node: NodeTrace) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "node_id": node.node_id,
+        "op": node.op,
+        "status": node.status,
+        "inputs_summary": node.inputs_summary,
+    }
+    if node.error:
+        summary["error"] = node.error
+    if node.child_trace is not None:
+        summary["child_trace"] = node.child_trace.to_dict()
+    return summary
+
+
+def _registry_skill_summaries(registry: object | None) -> list[dict[str, object]]:
+    list_all = getattr(registry, "list_all", None)
+    if not callable(list_all):
+        return []
+    try:
+        entries = list_all()
+    except Exception:
+        return []
+    summaries: list[dict[str, object]] = []
+    for entry in entries[:20]:
+        summaries.append({
+            "id": getattr(entry, "id", ""),
+            "version": getattr(entry, "version", ""),
+            "description": getattr(entry, "description", ""),
+            "inputs": list(getattr(entry, "input_names", [])),
+            "outputs": list(getattr(entry, "output_names", [])),
+            "effects": list(getattr(entry, "effects", [])),
+        })
+    return summaries
+
+
+def _lower_block_fragment(
+    block: IRBlock,
+    glue: GlueGraph,
+) -> tuple[list[Any], dict[tuple[str, str], Any]]:
+    parent_ir = PlanningIR(
+        goal=glue.goal,
+        inputs=[],
+        steps=[],
+        final_outputs={},
+        effects=glue.effects,
+    )
+    if block.kind == "loop":
+        lowered = _lower_loop_block(block, parent_ir=parent_ir, block_output_map={})
+    else:
+        lowered = _lower_branch_block(block, parent_ir=parent_ir, block_output_map={})
+    return lowered["steps"], lowered["outputs"]
+
+
+def _runtime_region_node_ids(glue: GlueGraph, block_name: str, kind: str) -> set[str]:
+    if kind == "loop":
+        return {block_name}
+    prefixes = (
+        f"{block_name}__then__",
+        f"{block_name}__else__",
+        f"{block_name}__merge__",
+    )
+    return {
+        node.id for node in glue.graph.nodes
+        if node.id.startswith(prefixes)
+    }
+
+
 
 
 def _align_glue_output_contracts(

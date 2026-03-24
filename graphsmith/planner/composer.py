@@ -141,13 +141,15 @@ def run_glue_graph(
     from graphsmith.planner.graph_repair import (
         normalize_glue_graph_contracts,
         repair_glue_graph_from_runtime_error,
+        repair_glue_graph_from_runtime_trace,
     )
     from graphsmith.runtime.executor import run_skill_package
 
     current_glue, runtime_repairs = normalize_glue_graph_contracts(
         glue, registry=registry,
     )
-    for attempt in range(2):
+    used_trace_regeneration = False
+    for attempt in range(3):
         pkg = glue_to_skill_package(current_glue)
         try:
             validate_skill_package(pkg)
@@ -161,15 +163,28 @@ def run_glue_graph(
             result.repairs = list(runtime_repairs)
             return result
         except ExecutionError as exc:
-            if attempt > 0:
-                raise
             repaired_glue, actions = repair_glue_graph_from_runtime_error(
                 current_glue, str(exc), registry=registry,
             )
-            if not actions:
-                raise
-            current_glue = repaired_glue
-            runtime_repairs.extend(actions)
+            if actions:
+                current_glue = repaired_glue
+                runtime_repairs.extend(actions)
+                continue
+
+            if not used_trace_regeneration:
+                repaired_glue, actions = repair_glue_graph_from_runtime_trace(
+                    current_glue,
+                    str(exc),
+                    trace=getattr(exc, "trace", None),
+                    llm_provider=llm_provider,
+                    registry=registry,
+                )
+                if actions:
+                    used_trace_regeneration = True
+                    current_glue = repaired_glue
+                    runtime_repairs.extend(actions)
+                    continue
+            raise
 
     raise PlannerError("Glue graph execution repair loop exited unexpectedly")
 

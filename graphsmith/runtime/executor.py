@@ -82,7 +82,9 @@ def run_skill_package(
         run_trace.error = str(exc)
         run_trace.ended_at = _now_iso()
         raise ExecutionError(
-            f"Execution failed at node '{node_id}': {exc}"
+            f"Execution failed at node '{node_id}': {exc}",
+            trace=run_trace,
+            node_id=node_id,
         ) from exc
 
     # 4. Resolve graph outputs
@@ -207,6 +209,7 @@ def _execute_node(
             ended_at=_now_iso(),
             inputs_summary=_summarise(resolved_inputs),
             error=str(exc),
+            child_trace=getattr(exc, "trace", None),
         ))
         raise
 

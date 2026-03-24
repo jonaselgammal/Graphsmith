@@ -494,6 +494,11 @@ def _lower_loop_block(
             "item_inputs": item_inputs,
             "max_items": block.max_items,
             "include_trace": True,
+            "__graphsmith_region__": {
+                "kind": "loop",
+                "block_name": block.name,
+                "block": block.model_dump(mode="json"),
+            },
             **block.config,
         },
     )
@@ -531,6 +536,7 @@ def _lower_branch_block(
         condition,
         False,
         block_output_map,
+        block,
     )
     else_steps = _lower_branch_side(
         block.name,
@@ -540,6 +546,7 @@ def _lower_branch_block(
         condition,
         True,
         block_output_map,
+        block,
     )
 
     merge_steps: list[IRStep] = []
@@ -555,6 +562,14 @@ def _lower_branch_block(
             IRStep(
                 name=merge_name,
                 skill_id="fallback.try",
+                config={
+                    "__graphsmith_region__": {
+                        "kind": "branch",
+                        "block_name": block.name,
+                        "block": block.model_dump(mode="json"),
+                        "side": "merge",
+                    },
+                },
                 sources={
                     "primary": IRSource(step=then_name_map[then_ref.step], port=then_ref.port),
                     "fallback": IRSource(step=else_name_map[else_ref.step], port=else_ref.port),
@@ -574,6 +589,7 @@ def _lower_branch_side(
     condition: IRSource,
     unless: bool,
     block_output_map: dict[tuple[str, str], IRSource],
+    block: Any,
 ) -> list[IRStep]:
     local_names = {step.name for step in steps}
     prefixed: list[IRStep] = []
@@ -596,7 +612,15 @@ def _lower_branch_side(
                 skill_id=step.skill_id,
                 version=step.version,
                 sources=sources,
-                config=step.config,
+                config={
+                    **step.config,
+                    "__graphsmith_region__": {
+                        "kind": "branch",
+                        "block_name": block_name,
+                        "block": block.model_dump(mode="json"),
+                        "side": side,
+                    },
+                },
                 when=condition,
                 unless=unless,
             )

@@ -134,6 +134,7 @@ Graphsmith now includes a bounded multi-layer repair path:
 - block-local LLM regeneration when a single branch/loop block is still invalid
 - graph-level contract normalization before validation/execution
 - one runtime-informed graph patch retry on specific execution failures
+- one runtime-trace-guided branch/loop region regeneration retry
 
 ### 1. IR-local repair
 
@@ -224,9 +225,36 @@ without falling back to whole-plan regeneration.
 Current limitations:
 - only one retry
 - only for block-local compiler failures that still carry a `block_name`
-- no runtime-trace-guided region regeneration yet
 - no nested-region regeneration
 - no skill synthesis if the repaired block still lacks capability
+
+### 5. Runtime-trace-guided region regeneration
+
+When execution reaches a lowered control-flow region and fails at runtime,
+Graphsmith now performs one additional bounded repair layer using the observed
+trace.
+
+Current behavior:
+- lowered loop and branch regions now carry source block metadata in node config
+- `parallel.map` now propagates failed child traces outward, including inline
+  loop body failures
+- executor-raised `ExecutionError`s now carry the run trace and failing node id
+- `run_glue_graph()` first tries deterministic runtime graph repair, then, if
+  that is insufficient, it uses the failing runtime trace to regenerate only
+  the affected loop or branch region
+- the repaired region is re-lowered and spliced back into the existing graph,
+  preserving the rest of the graph unchanged
+
+This is the first runtime repair layer that uses structural evidence instead of
+only error-string pattern matching.
+
+Current limitations:
+- only one trace-guided regeneration attempt
+- only top-level lowered `loop` and `branch` regions
+- branch support exists structurally, but current tests cover the loop path
+- region replacement assumes the block preserves its exposed outputs
+- no nested region repair from deep child traces yet
+- no skill synthesis fallback if region regeneration still fails
 
 ## Output-contract repair
 
@@ -250,7 +278,7 @@ This is intentionally narrow and structural:
 
 The next layer is a fuller structural repair loop:
 - classify compiler and runtime failures by region and failure type
-- use trace evidence to regenerate a failing loop body or branch arm
 - patch nested regions, not just top-level blocks
+- repair a single branch arm instead of regenerating the whole branch block
 - escalate from local repair to skill synthesis only when local composition
   remains insufficient

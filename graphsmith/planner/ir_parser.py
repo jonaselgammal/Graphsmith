@@ -130,7 +130,7 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
                 version=s.get("version", "1.0.0"),
                 sources=sources,
                 config=s.get("config", {}),
-                when=_normalize_source(s["when"]) if "when" in s else None,
+                when=_normalize_source(s["when"]) if s.get("when") is not None else None,
                 unless=bool(s.get("unless", False)),
             )
         )
@@ -162,8 +162,8 @@ def _build_block(block: dict[str, Any]) -> IRBlock:
     return IRBlock(
         name=block["name"],
         kind=block["kind"],
-        condition=_normalize_source(block["condition"]) if "condition" in block else None,
-        collection=_normalize_source(block["collection"]) if "collection" in block else None,
+        condition=_normalize_source(block["condition"]) if block.get("condition") is not None else None,
+        collection=_normalize_source(block["collection"]) if block.get("collection") is not None else None,
         inputs={
             port: _normalize_source(src)
             for port, src in block.get("inputs", {}).items()
@@ -195,7 +195,7 @@ def _build_step(step: dict[str, Any]) -> IRStep:
         version=step.get("version", "1.0.0"),
         sources={port: _normalize_source(src) for port, src in step.get("sources", {}).items()},
         config=step.get("config", {}),
-        when=_normalize_source(step["when"]) if "when" in step else None,
+        when=_normalize_source(step["when"]) if step.get("when") is not None else None,
         unless=bool(step.get("unless", False)),
     )
 
@@ -210,7 +210,7 @@ def _normalize_source(src: Any, step_names: set[str] | None = None) -> IRSource:
     - "$binding_name" (binding shorthand)
     """
     if isinstance(src, dict):
-        if "binding" in src:
+        if src.get("binding") is not None:
             return IRSource(binding=src["binding"])
         return IRSource(step=src["step"], port=src["port"])
 

@@ -16,6 +16,17 @@ class ValidationError(GraphsmithError):
 class ExecutionError(GraphsmithError):
     """Raised when a graph execution fails at runtime."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        trace: object | None = None,
+        node_id: str = "",
+    ) -> None:
+        self.trace = trace
+        self.node_id = node_id
+        super().__init__(message)
+
 
 class OpError(ExecutionError):
     """Raised when a primitive op fails."""
