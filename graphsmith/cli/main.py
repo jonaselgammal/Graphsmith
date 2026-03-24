@@ -1093,6 +1093,61 @@ def eval_planner(
                 typer.echo(f"         error: {r.error[:150]}")
 
 
+@app.command("eval-frontier")
+def eval_frontier(
+    goals_dir: str = typer.Option(
+        "evaluation/frontier_goals", "--goals",
+        help="Directory containing frontier goal JSON files.",
+    ),
+    registry_root: Optional[str] = typer.Option(
+        None, "--registry", help="Registry root with published skills.",
+    ),
+    backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible providers."),
+    output_format: str = typer.Option("text", "--output-format", help="text or json."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates to generate and rerank."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition stage before IR generation."),
+) -> None:
+    """Run the cross-domain frontier suite through the closed-loop solve path."""
+    from graphsmith.evaluation.frontier_eval import load_frontier_cases, run_frontier_suite
+    from graphsmith.registry import LocalRegistry
+
+    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    planner_backend = _make_planner_backend(
+        backend, mock_llm, provider=provider, model=model, base_url=base_url,
+        ir_candidates=ir_candidates, use_decomposition=use_decomposition,
+    )
+    cases = load_frontier_cases(goals_dir)
+    report = run_frontier_suite(
+        cases,
+        reg,
+        planner_backend,
+        provider_name=provider,
+        model_name=model or "",
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.model_dump(), indent=2))
+        return
+
+    typer.echo(f"Frontier Evaluation ({report.provider} {report.model})")
+    typer.echo(f"Passed: {report.passed}/{report.total} ({report.pass_rate * 100:.1f}%)")
+    for result in report.results:
+        typer.echo(
+            f"  [{result.status}] {result.id} tier={result.tier} "
+            f"expected_success={result.expected_success} observed_success={result.observed_success}"
+        )
+        typer.echo(f"       goal: {result.goal}")
+        typer.echo(
+            f"       initial={result.initial_status} missing={result.detected_missing} "
+            f"generated={result.generated_skill_id or '-'} replan={result.replan_status or '-'} "
+            f"stopped={result.stopped_reason}"
+        )
+
+
 # ── helpers ──────────────────────────────────────────────────────────
 
 

@@ -1,0 +1,8 @@
+{
+  "id": "f03",
+  "goal": "Pretty print this json",
+  "tier": 1,
+  "tags": ["json", "autogen", "single_missing"],
+  "expected_success": true,
+  "notes": "Out-of-example deterministic JSON formatting."
+}

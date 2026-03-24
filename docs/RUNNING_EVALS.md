@@ -74,7 +74,26 @@ GS_EVAL_DELAY=5 scripts/run_stability_eval.sh 3 \
 python scripts/analyze_stability.py /tmp/gs_stability_*/
 ```
 
-## 5. Collect candidate-level data
+## 5. Run the frontier suite
+
+This suite probes the closed-loop path and broader generalization limits,
+including goals outside the example text-processing domain.
+
+```bash
+REG=$(mktemp -d)
+for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG" 2>/dev/null; done
+
+graphsmith eval-frontier --goals evaluation/frontier_goals --registry "$REG" \
+  --backend ir --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1 --output-format json
+```
+
+Interpretation:
+- tier 1 failures usually mean closed-loop missing-skill synthesis/promotion is still weak
+- tier 2 failures usually mean generated skills do not re-enter composition robustly
+- tier 3 includes explicit boundary probes and is expected to contain some clean failures
+
+## 6. Collect candidate-level data
 
 ```bash
 python scripts/collect_candidate_data.py --runs 1 \
@@ -82,7 +101,7 @@ python scripts/collect_candidate_data.py --runs 1 \
   --provider anthropic --model claude-haiku-4-5-20251001 --delay 2
 ```
 
-## 6. Compare planners (direct vs IR)
+## 7. Compare planners (direct vs IR)
 
 ```bash
 GS_EVAL_DELAY=3 scripts/eval_compare_planners.sh \

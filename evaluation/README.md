@@ -38,6 +38,24 @@ graphsmith eval-planner --goals evaluation/challenge_goals --registry "$REG" \
   --backend llm --provider anthropic --model claude-haiku-4-5-20251001
 ```
 
+## Frontier set (cross-domain generalization probes)
+
+`evaluation/frontier_goals/` is a deliberately broader suite aimed at the
+closed-loop path rather than only planner composition inside the example
+text-processing domain.
+
+It mixes:
+- tier 1: single missing deterministic skills outside the example domain
+- tier 2: mixed compositions that require both existing skills and one generated skill
+- tier 3: harder boundary probes that are expected to fail cleanly for now
+
+Use it to see where Graphsmith stops generalizing:
+```bash
+graphsmith eval-frontier --goals evaluation/frontier_goals --registry "$REG" \
+  --backend ir --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
+```
+
 ## Running evaluations via scripts
 
 The easiest way to run evaluations. Pass provider flags as arguments:

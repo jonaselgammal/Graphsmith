@@ -1,0 +1,8 @@
+{
+  "id": "f07",
+  "goal": "Normalize this text and count the characters",
+  "tier": 2,
+  "tags": ["text", "composition", "autogen_plus_existing"],
+  "expected_success": true,
+  "notes": "Generated counting skill composed after an existing transform."
+}

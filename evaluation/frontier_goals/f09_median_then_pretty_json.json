@@ -1,0 +1,9 @@
+{
+  "id": "f09",
+  "goal": "Compute the median and then pretty print it as json",
+  "tier": 3,
+  "tags": ["math", "json", "multi_missing", "boundary"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed"],
+  "notes": "Two missing capabilities and cross-domain formatting in one goal."
+}

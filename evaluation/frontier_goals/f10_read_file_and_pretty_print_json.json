@@ -1,0 +1,9 @@
+{
+  "id": "f10",
+  "goal": "Read a json file from disk and pretty print it",
+  "tier": 3,
+  "tags": ["filesystem", "json", "out_of_scope", "boundary"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["missing_skill_not_detected"],
+  "notes": "Explicit filesystem boundary."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "f06",
+  "goal": "Summarize this text and then convert the summary to uppercase",
+  "tier": 2,
+  "tags": ["text", "llm", "composition", "autogen_plus_existing"],
+  "expected_success": true,
+  "notes": "LLM step plus missing deterministic post-processing."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "f11",
+  "goal": "For each number list, compute the median",
+  "tier": 3,
+  "tags": ["loop", "math", "autogen", "boundary"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed"],
+  "notes": "Loop planning plus missing generated math skill."
+}
