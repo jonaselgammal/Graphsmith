@@ -400,25 +400,25 @@ def extract_spec(goal: str) -> SkillSpec:
     Raises AutogenError for out-of-scope or unrecognized requests.
     """
     goal_lower = goal.lower().strip()
+    goal_tokens = re.findall(r"[a-z0-9]+", goal_lower)
 
     # Check out-of-scope phrases
     for phrase in _OUT_OF_SCOPE_PHRASES:
-        if phrase in goal_lower:
+        if _keyword_match_score(goal_lower, goal_tokens, phrase) > 0:
             raise AutogenError(
                 f"Out of scope: '{phrase}' is not supported for automatic skill creation. "
                 f"This prototype supports simple deterministic text/math/JSON ops only."
             )
 
-    # Match against template catalog (longest keyword wins)
+    # Match against template catalog (prefer exact substring, then longest subsequence)
     best_key: str | None = None
     best_score = 0
     for key, tmpl in _TEMPLATES.items():
         for kw in tmpl["keywords"]:
-            if kw in goal_lower:
-                score = len(kw)
-                if score > best_score:
-                    best_key = key
-                    best_score = score
+            score = _keyword_match_score(goal_lower, goal_tokens, kw)
+            if score > best_score:
+                best_key = key
+                best_score = score
 
     if best_key is None:
         goal_words = set(re.findall(r"[a-z]+", goal_lower))
@@ -436,6 +436,28 @@ def extract_spec(goal: str) -> SkillSpec:
         )
 
     return _spec_from_template(best_key, goal)
+
+
+def _keyword_match_score(goal_lower: str, goal_tokens: list[str], keyword: str) -> int:
+    """Score a keyword match by substring or ordered-token subsequence.
+
+    The subsequence path catches natural phrasings like "count the characters"
+    for a template keyword such as "count characters".
+    """
+    if keyword in goal_lower:
+        return 1000 + len(keyword)
+
+    keyword_tokens = re.findall(r"[a-z0-9]+", keyword.lower())
+    if not keyword_tokens:
+        return 0
+
+    pos = 0
+    for token in goal_tokens:
+        if token == keyword_tokens[pos]:
+            pos += 1
+            if pos == len(keyword_tokens):
+                return len(keyword)
+    return 0
 
 
 def _spec_from_template(template_key: str, goal: str) -> SkillSpec:

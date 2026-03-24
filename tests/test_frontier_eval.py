@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -11,9 +12,11 @@ from graphsmith.evaluation.frontier_eval import (
     FrontierCase,
     FrontierCaseResult,
     FrontierReport,
+    evaluate_frontier_case,
     load_frontier_cases,
     run_frontier_suite,
 )
+from graphsmith.registry.local import LocalRegistry
 from graphsmith.skills.autogen import SkillSpec
 from graphsmith.skills.closed_loop import ClosedLoopResult
 
@@ -117,3 +120,21 @@ def test_eval_frontier_cli_json(monkeypatch, tmp_path: Path) -> None:
     assert data["total"] == 1
     assert data["passed"] == 1
     assert data["results"][0]["generated_skill_id"] == "math.median.v1"
+
+
+def test_evaluate_frontier_case_isolates_registry_per_case(monkeypatch) -> None:
+    seen_roots: list[str] = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = LocalRegistry(tmpdir)
+
+        def fake_run_closed_loop(goal, backend, registry, *, output_dir=None, auto_approve=False, confirm_fn=None):
+            seen_roots.append(str(registry.root))
+            return ClosedLoopResult(initial_status="failure", stopped_reason="missing_skill_not_detected")
+
+        monkeypatch.setattr("graphsmith.evaluation.frontier_eval.run_closed_loop", fake_run_closed_loop)
+
+        case = FrontierCase(id="x", goal="goal")
+        evaluate_frontier_case(case, registry, backend=object())
+
+    assert seen_roots
+    assert seen_roots[0] != str(registry.root)

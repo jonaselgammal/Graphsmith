@@ -28,6 +28,7 @@ class TestExtractSpec:
         ("convert to lowercase", "lowercase"),
         ("trim whitespace", "trim"),
         ("count characters", "char_count"),
+        ("count the characters", "char_count"),
         ("count lines in text", "line_count"),
         ("join lines together", "join"),
         ("check if text starts with prefix", "starts_with"),
@@ -45,6 +46,7 @@ class TestExtractSpec:
         ("check if json has key", "has_key"),
         ("list json keys", "keys"),
         ("pretty print json", "pretty"),
+        ("pretty print this json", "pretty"),
     ])
     def test_template_matching(self, goal: str, expected_key: str) -> None:
         spec = extract_spec(goal)

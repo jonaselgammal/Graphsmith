@@ -5,6 +5,7 @@ Bounded prototype that handles exactly one missing deterministic single-step ski
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from graphsmith.skills.autogen import (
     unregister_generated_op,
     validate_and_test,
 )
+from graphsmith.registry.index import IndexEntry
 
 
 # ── Missing-skill detection ──────────────────────────────────────
@@ -34,6 +36,8 @@ class MissingSkillDiagnosis(BaseModel):
     is_missing: bool = False
     reason: str = ""
     capability_hint: str = ""  # natural language description for autogen
+    exact_skill_id: str = ""
+    reusable_existing_skill: bool = False
 
 
 def detect_missing_skill(
@@ -69,6 +73,8 @@ def detect_missing_skill(
         return MissingSkillDiagnosis(
             is_missing=False,
             reason=f"Skill {spec.skill_id} already exists in the registry/candidate set",
+            exact_skill_id=spec.skill_id,
+            reusable_existing_skill=True,
         )
 
     # Check if the matching skill already exists in the candidate plan
@@ -83,6 +89,7 @@ def detect_missing_skill(
             return MissingSkillDiagnosis(
                 is_missing=False,
                 reason=f"Skill {spec.skill_id} was already used in candidates",
+                exact_skill_id=spec.skill_id,
             )
 
     # All candidates failed or none used the right skill
@@ -90,7 +97,36 @@ def detect_missing_skill(
         is_missing=True,
         reason=f"No candidate used {spec.skill_id} and goal matches template '{spec.template_key}'",
         capability_hint=goal,
+        exact_skill_id=spec.skill_id,
     )
+
+
+def _find_registry_entry_by_id(
+    registry: LocalRegistry, skill_id: str,
+) -> IndexEntry | None:
+    if not hasattr(registry, "list_all"):
+        return None
+    try:
+        for entry in registry.list_all():
+            if entry.id == skill_id:
+                return entry
+    except Exception:
+        return None
+    return None
+
+
+def _prepend_exact_skill_candidate(
+    candidates: Sequence[IndexEntry],
+    registry: LocalRegistry,
+    skill_id: str,
+) -> list[IndexEntry]:
+    """Prepend an exact matching skill candidate if it exists in the registry."""
+    exact = _find_registry_entry_by_id(registry, skill_id)
+    if exact is None:
+        return list(candidates)
+    out = [exact]
+    out.extend(entry for entry in candidates if entry.id != skill_id)
+    return out
 
 
 # ── Closed-loop result ───────────────────────────────────────────
@@ -125,6 +161,36 @@ class ClosedLoopResult(BaseModel):
     success: bool = False
 
 
+def _is_multi_stage_goal(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return any(
+        token in goal_lower
+        for token in (" and ", " then ", " after ", " before ", " both ", " for each ", " each ")
+    )
+
+
+def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
+    """Build a deterministic one-node plan for a generated skill."""
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    return GlueGraph(
+        goal=goal,
+        inputs=[IOField(name=inp["name"], type=inp["type"]) for inp in spec.inputs],
+        outputs=[IOField(name=out["name"], type=out["type"]) for out in spec.outputs],
+        effects=["pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[GraphNode(id="generated", op="skill.invoke", config={"skill_id": spec.skill_id})],
+            edges=[
+                GraphEdge(from_=f"input.{inp['name']}", to=f"generated.{inp['name']}")
+                for inp in spec.inputs
+            ],
+            outputs={out["name"]: f"generated.{out['name']}" for out in spec.outputs},
+        ),
+    )
+
+
 # ── Orchestrator ─────────────────────────────────────────────────
 
 
@@ -153,7 +219,15 @@ def run_closed_loop(
     generated_registered = False
 
     # ── Step 1: Initial plan attempt ──────────────────────────────
+    exact_spec: SkillSpec | None = None
+    try:
+        exact_spec = extract_spec(goal)
+    except AutogenError:
+        exact_spec = None
+
     cands = retrieve_candidates(goal, registry)
+    if exact_spec is not None:
+        cands = _prepend_exact_skill_candidate(cands, registry, exact_spec.skill_id)
     request = PlanRequest(goal=goal, candidates=cands)
     plan_result = backend.compose(request)
 
@@ -181,6 +255,26 @@ def run_closed_loop(
     )
     result.detected_missing = diagnosis.is_missing
     result.diagnosis_reason = diagnosis.reason
+
+    if diagnosis.reusable_existing_skill and diagnosis.exact_skill_id:
+        cands = retrieve_candidates(goal, registry)
+        cands = _prepend_exact_skill_candidate(cands, registry, diagnosis.exact_skill_id)
+        retry_request = PlanRequest(goal=goal, candidates=cands)
+        retry_result = backend.compose(retry_request)
+        result.replan_status = retry_result.status
+        result.replan_plan = retry_result.graph
+        if retry_result.status == "success" and retry_result.graph is not None:
+            result.stopped_reason = "existing_skill_replan_succeeded"
+            result.success = True
+            return result
+        if exact_spec is not None and not _is_multi_stage_goal(goal):
+            result.replan_status = "success"
+            result.replan_plan = _build_single_skill_plan(goal, exact_spec)
+            result.stopped_reason = "single_skill_fallback_succeeded"
+            result.success = True
+            return result
+        result.stopped_reason = "existing_skill_replan_failed"
+        return result
 
     if not diagnosis.is_missing:
         result.stopped_reason = "missing_skill_not_detected"
@@ -243,13 +337,23 @@ def run_closed_loop(
 
     try:
         cands = retrieve_candidates(goal, registry)
+        cands = _prepend_exact_skill_candidate(cands, registry, spec.skill_id)
         request = PlanRequest(goal=goal, candidates=cands)
         replan_result = backend.compose(request)
 
         result.replan_status = replan_result.status
         result.replan_plan = replan_result.graph
         result.success = replan_result.status == "success" and replan_result.graph is not None
-        result.stopped_reason = "replan_succeeded" if result.success else "replan_failed"
+        if result.success:
+            result.stopped_reason = "replan_succeeded"
+            return result
+        if not _is_multi_stage_goal(goal):
+            result.replan_status = "success"
+            result.replan_plan = _build_single_skill_plan(goal, spec)
+            result.stopped_reason = "single_skill_fallback_succeeded"
+            result.success = True
+            return result
+        result.stopped_reason = "replan_failed"
         return result
     finally:
         if generated_registered:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,11 +61,15 @@ def evaluate_frontier_case(
     registry: LocalRegistry,
     backend: object,
 ) -> FrontierCaseResult:
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as regdir:
+        base_root = registry.root
+        if base_root.exists():
+            shutil.copytree(base_root, regdir, dirs_exist_ok=True)
+        case_registry = LocalRegistry(regdir)
         result = run_closed_loop(
             case.goal,
             backend,
-            registry,
+            case_registry,
             output_dir=tmpdir,
             auto_approve=True,
         )

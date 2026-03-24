@@ -71,6 +71,8 @@ class TestDetectMissingSkill:
         )
         assert not d.is_missing
         assert "already exists" in d.reason
+        assert d.reusable_existing_skill
+        assert d.exact_skill_id == "math.median.v1"
 
 
 # ── Autogen median template ──────────────────────────────────────
@@ -313,6 +315,94 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert not result.detected_missing
 
+    def test_existing_exact_skill_gets_one_targeted_replan(self) -> None:
+        from graphsmith.registry.local import LocalRegistry
+        from graphsmith.skills.autogen import (
+            generate_skill_files,
+            register_generated_op,
+            unregister_generated_op,
+        )
+
+        class RetryWithExistingSkillBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                self.calls += 1
+                if self.calls == 1:
+                    return PlanResult(status="failure")
+                assert request.candidates
+                assert request.candidates[0].id == "math.median.v1"
+                return PlanResult(status="success", graph=MagicMock(spec=GlueGraph))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reg = LocalRegistry(tmpdir)
+            spec = extract_spec("compute the median")
+            skill_dir = generate_skill_files(spec, Path(tmpdir) / "gen")
+            register_generated_op(spec)
+            try:
+                reg.publish(skill_dir)
+                backend = RetryWithExistingSkillBackend()
+
+                result = run_closed_loop(
+                    "compute the median of numbers",
+                    backend,
+                    reg,
+                    auto_approve=True,
+                )
+            finally:
+                unregister_generated_op(spec)
+
+        assert result.stopped_reason == "existing_skill_replan_succeeded"
+        assert result.replan_status == "success"
+        assert result.success
+
+    def test_single_skill_fallback_after_replan_failure(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "compute the median of numbers",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "single_skill_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert result.replan_plan.graph.nodes[0].config["skill_id"] == "math.median.v1"
+
 
 # ── Format output ────────────────────────────────────────────────
 
@@ -373,4 +463,4 @@ class TestClosedLoopCli:
         assert "Closed-Loop Result" in result.output
         assert "Generated: math.median.v1" in result.output
         assert "Validation: PASS" in result.output
-        assert "Stopped: replan_failed" in result.output
+        assert "Stopped: single_skill_fallback_succeeded" in result.output

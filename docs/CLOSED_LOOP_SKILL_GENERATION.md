@@ -13,6 +13,8 @@ validating it, and replanning — all in one bounded loop.
 5. Ask user to confirm
 6. Publish to temporary registry
 7. Replan with new skill available
+8. If the goal is still a single-step capability and replan fails,
+   build a deterministic one-skill fallback graph
 ```
 
 ## Supported scope
@@ -70,8 +72,10 @@ Detection is narrow and explicit:
 
 1. Initial planning must fail (no valid plan produced)
 2. Goal must match an autogen template keyword
-3. The matching skill must not already exist in the registry or candidate set
-4. The matching skill must not already be used in compiled candidate plans
+3. If the exact matching skill already exists in the registry, Graphsmith will
+   do one targeted retry with that skill explicitly prepended to the candidate list
+4. Otherwise the matching skill must not already exist in the registry or candidate set
+5. The matching skill must not already be used in compiled candidate plans
 
 If any condition is not met, no generation is attempted.
 
@@ -106,8 +110,14 @@ explicit. Common stop reasons are:
   exercised instead of falling through to the mock planner.
 - Missing-skill detection now checks the live registry/candidate set before
   deciding a capability is truly absent.
+- Autogen matching now handles more natural phrasing variants such as
+  `pretty print this json` and `count the characters`.
+- If the exact generated skill already exists in the registry, Graphsmith now
+  does one targeted retry before giving up.
 - Generated ops are now cleaned up after the bounded loop, so autogen does not
   leak transient runtime ops into unrelated later commands.
+- For true single-step capabilities, Graphsmith can now fall back to a
+  deterministic one-node `skill.invoke` graph when replan still fails.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of
@@ -120,7 +130,7 @@ echo provider does not produce a usable replan.
 - Only covers the 21 template families in the autogen catalog
 - Cannot generate multi-step or LLM-dependent skills
 - Cannot handle cases where multiple skills are missing
-- Does not learn from failures
+- Multi-stage mixed compositions after generation are still the main weak spot
 
 ## Files
 
