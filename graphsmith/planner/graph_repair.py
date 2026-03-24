@@ -30,7 +30,11 @@ _PRIMITIVE_OUTPUT_PORTS = {
 }
 
 
-def normalize_glue_graph_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str]]:
+def normalize_glue_graph_contracts(
+    glue: GlueGraph,
+    *,
+    registry: object | None = None,
+) -> tuple[GlueGraph, list[str]]:
     """Normalize common legacy graph contracts before validation/execution."""
     repaired = glue
     actions: list[str] = []
@@ -104,7 +108,7 @@ def normalize_glue_graph_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str
 
         actions.extend(node_actions)
 
-    repaired, output_actions = _align_glue_output_contracts(repaired)
+    repaired, output_actions = _align_glue_output_contracts(repaired, registry=registry)
     actions.extend(output_actions)
 
     return repaired, actions
@@ -113,6 +117,8 @@ def normalize_glue_graph_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str
 def repair_glue_graph_from_runtime_error(
     glue: GlueGraph,
     error_text: str,
+    *,
+    registry: object | None = None,
 ) -> tuple[GlueGraph, list[str]]:
     """Attempt one bounded graph repair from a runtime error message."""
     repaired = glue
@@ -135,6 +141,25 @@ def repair_glue_graph_from_runtime_error(
         node_id = result_alias_match.group(1)
         repaired = _rewrite_node_port_alias(repaired, node_id, "result", "results")
         actions.append(f"runtime:{node_id}: rewrite result output references to results")
+
+    named_result_match = re.search(
+        r"Address '([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)' has no value\..*'([A-Za-z0-9_]+)\.results'",
+        error_text,
+    )
+    if named_result_match and named_result_match.group(1) == named_result_match.group(3):
+        node_id = named_result_match.group(1)
+        requested_port = named_result_match.group(2)
+        if requested_port not in _GENERIC_COLLECTION_OUTPUTS:
+            repaired, enabled = _enable_parallel_map_named_output(
+                repaired,
+                node_id,
+                requested_port,
+                registry=registry,
+            )
+            if enabled:
+                actions.append(
+                    f"runtime:{node_id}: enable aggregated named output '{requested_port}' for parallel.map"
+                )
 
     items_match = re.search(
         r"Execution failed at node '([A-Za-z0-9_]+)': array\.map requires input 'items'",
@@ -275,7 +300,11 @@ def _collect_referenced_ports(glue: GlueGraph, node_id: str) -> set[str]:
     return refs
 
 
-def _align_glue_output_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str]]:
+def _align_glue_output_contracts(
+    glue: GlueGraph,
+    *,
+    registry: object | None = None,
+) -> tuple[GlueGraph, list[str]]:
     output_name_by_node_port = {
         address: name for name, address in glue.graph.outputs.items()
     }
@@ -294,7 +323,7 @@ def _align_glue_output_contracts(glue: GlueGraph) -> tuple[GlueGraph, list[str]]
             continue
         if output_name not in _GENERIC_COLLECTION_OUTPUTS and port not in _GENERIC_COLLECTION_OUTPUTS:
             continue
-        inferred = _infer_parallel_map_named_output(node)
+        inferred = _infer_parallel_map_named_output(node, registry=registry)
         if not inferred or inferred in _GENERIC_COLLECTION_OUTPUTS:
             continue
 
@@ -357,7 +386,11 @@ def _rewrite_graph_output(
     )
 
 
-def _infer_parallel_map_named_output(node: GraphNode) -> str | None:
+def _infer_parallel_map_named_output(
+    node: GraphNode,
+    *,
+    registry: object | None = None,
+) -> str | None:
     config = node.config
     output_port = config.get("output_port")
     if isinstance(output_port, str) and output_port and output_port not in _GENERIC_COLLECTION_OUTPUTS:
@@ -375,6 +408,16 @@ def _infer_parallel_map_named_output(node: GraphNode) -> str | None:
                 mapped_name = next(iter(output_mapping))
                 if isinstance(mapped_name, str) and mapped_name:
                     return mapped_name
+            skill_id = op_config.get("skill_id")
+            version = op_config.get("version")
+            if (
+                registry is not None
+                and isinstance(skill_id, str)
+                and isinstance(version, str)
+            ):
+                inferred = _infer_skill_output_from_registry(registry, skill_id, version)
+                if inferred:
+                    return inferred
 
     if op == "__inline_graph__":
         body = config.get("body")
@@ -388,6 +431,48 @@ def _infer_parallel_map_named_output(node: GraphNode) -> str | None:
                         return name
 
     return None
+
+
+def _infer_skill_output_from_registry(
+    registry: object,
+    skill_id: str,
+    version: str,
+) -> str | None:
+    fetch = getattr(registry, "fetch", None)
+    if not callable(fetch):
+        return None
+    try:
+        pkg = fetch(skill_id, version)
+    except Exception:
+        return None
+    outputs = getattr(pkg.skill, "outputs", None)
+    if not isinstance(outputs, list) or len(outputs) != 1:
+        return None
+    name = getattr(outputs[0], "name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def _enable_parallel_map_named_output(
+    glue: GlueGraph,
+    node_id: str,
+    requested_port: str,
+    *,
+    registry: object | None = None,
+) -> tuple[GlueGraph, bool]:
+    node = next((n for n in glue.graph.nodes if n.id == node_id), None)
+    if node is None or node.op != "parallel.map":
+        return glue, False
+    inferred = _infer_parallel_map_named_output(node, registry=registry)
+    if inferred != requested_port:
+        return glue, False
+    if node.config.get("aggregate_outputs"):
+        return glue, False
+    updated = _update_node_config(
+        glue,
+        node_id,
+        {**node.config, "aggregate_outputs": True},
+    )
+    return updated, True
 
 
 def _lift_parallel_map_operation(config: dict[str, object], operation: str) -> None:

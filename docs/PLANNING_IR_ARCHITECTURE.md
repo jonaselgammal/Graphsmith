@@ -173,6 +173,8 @@ Current scope:
 - rewrite stale loop output alias `mapped -> results`
 - align generic collection outputs like `results` / `mapped` to a named loop
   output when the inner op contract makes that mapping deterministic
+- infer single-output loop result names from fetched skill contracts when the
+  loop body is `skill.invoke`
 
 This matters because saved plans and direct graph output can still contain
 legacy or partially-normalized loop contracts even when the semantic plan is
@@ -188,6 +190,9 @@ Current scope:
 - rewrite stale `result -> results` references for collection outputs
 - rewrite runtime input alias failures like `array.map` / `parallel.map`
   expecting `items`
+- enable aggregated named loop outputs when runtime proves the graph requested a
+  specific loop field but only `results` was materialized and the loop body
+  contract makes that field deterministic
 
 This is not yet a general repair loop. It still does not:
 - fix arbitrary bad dataflow

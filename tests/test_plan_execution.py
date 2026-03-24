@@ -23,6 +23,10 @@ from graphsmith.planner import (
     save_plan,
 )
 from graphsmith.planner.composer import glue_to_skill_package
+from graphsmith.planner.graph_repair import (
+    normalize_glue_graph_contracts,
+    repair_glue_graph_from_runtime_error,
+)
 from graphsmith.registry import LocalRegistry
 
 from conftest import EXAMPLE_DIR, minimal_examples, minimal_graph, minimal_skill, write_package
@@ -287,6 +291,42 @@ class TestRunGlueGraph:
             "graph:normalize_all: enable aggregated outputs from nested skill output mapping",
         ]
 
+    def test_aligns_parallel_map_skill_output_from_registry_contract(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        glue = GlueGraph(
+            goal="normalize strings",
+            inputs=[IOField(name="strings", type="array<string>")],
+            outputs=[IOField(name="results", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="normalize_all",
+                        op="parallel.map",
+                        config={
+                            "op": "skill.invoke",
+                            "item_input": "text",
+                            "op_config": {"skill_id": "text.normalize.v1", "version": "1.0.0"},
+                        },
+                    )
+                ],
+                edges=[{"from": "input.strings", "to": "normalize_all.items"}],
+                outputs={"results": "normalize_all.results"},
+            ),
+        )
+
+        repaired, actions = normalize_glue_graph_contracts(glue, registry=reg)
+        assert repaired.graph.outputs == {"normalized": "normalize_all.normalized"}
+        assert repaired.outputs[0].name == "normalized"
+        assert "graph:normalize_all: enable aggregated named outputs for parallel.map" in actions
+        assert "graph:normalize_all: align generic output 'results' to named output 'normalized'" in actions
+
     def test_aligns_generic_parallel_map_output_name(self) -> None:
         glue = GlueGraph(
             goal="normalize strings",
@@ -339,6 +379,47 @@ class TestRunGlueGraph:
         assert exec_result.repairs == [
             "graph:normalize_all: enable aggregated named outputs for parallel.map",
             "graph:normalize_all: align generic output 'normalized' to named output 'normalized'",
+        ]
+
+    def test_runtime_repair_enables_named_parallel_map_output_from_registry_contract(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        glue = GlueGraph(
+            goal="normalize strings",
+            inputs=[IOField(name="strings", type="array<string>")],
+            outputs=[IOField(name="normalized", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="normalize_all",
+                        op="parallel.map",
+                        config={
+                            "op": "skill.invoke",
+                            "item_input": "text",
+                            "op_config": {"skill_id": "text.normalize.v1", "version": "1.0.0"},
+                        },
+                    )
+                ],
+                edges=[{"from": "input.strings", "to": "normalize_all.items"}],
+                outputs={"normalized": "normalize_all.normalized"},
+            ),
+        )
+
+        repaired, actions = repair_glue_graph_from_runtime_error(
+            glue,
+            "Address 'normalize_all.normalized' has no value. Available: ['input.strings', 'normalize_all.results']",
+            registry=reg,
+        )
+        node = repaired.graph.nodes[0]
+        assert node.config["aggregate_outputs"] is True
+        assert actions == [
+            "runtime:normalize_all: enable aggregated named output 'normalized' for parallel.map"
         ]
 
 

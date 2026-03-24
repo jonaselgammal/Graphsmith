@@ -60,18 +60,22 @@ def compose_plan(
 
     # 4. Validate the graph if present
     if result.graph is not None:
-        result = _validate_glue_graph(result)
+        result = _validate_glue_graph(result, registry=registry)
 
     return result
 
 
-def _validate_glue_graph(result: PlanResult) -> PlanResult:
+def _validate_glue_graph(
+    result: PlanResult,
+    *,
+    registry: LocalRegistry | None = None,
+) -> PlanResult:
     """Wrap the GlueGraph in a synthetic SkillPackage and validate it."""
     from graphsmith.planner.graph_repair import normalize_glue_graph_contracts
 
     glue = result.graph
     assert glue is not None
-    glue, actions = normalize_glue_graph_contracts(glue)
+    glue, actions = normalize_glue_graph_contracts(glue, registry=registry)
     if actions:
         result = result.model_copy(
             update={
@@ -140,7 +144,9 @@ def run_glue_graph(
     )
     from graphsmith.runtime.executor import run_skill_package
 
-    current_glue, runtime_repairs = normalize_glue_graph_contracts(glue)
+    current_glue, runtime_repairs = normalize_glue_graph_contracts(
+        glue, registry=registry,
+    )
     for attempt in range(2):
         pkg = glue_to_skill_package(current_glue)
         try:
@@ -158,7 +164,7 @@ def run_glue_graph(
             if attempt > 0:
                 raise
             repaired_glue, actions = repair_glue_graph_from_runtime_error(
-                current_glue, str(exc),
+                current_glue, str(exc), registry=registry,
             )
             if not actions:
                 raise
