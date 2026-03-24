@@ -1,0 +1,11 @@
+{
+  "id": "f02",
+  "goal": "Normalize this text, summarize it, and check whether the summary contains a phrase",
+  "tier": 1,
+  "tags": ["text", "llm", "predicate", "generated"],
+  "expected_success": true,
+  "required_skill_ids": ["text.normalize.v1", "text.summarize.v1", "text.contains.v1"],
+  "required_graph_inputs": ["substring"],
+  "min_node_count": 3,
+  "notes": "Existing normalize and summarize skills composed with generated contains predicate."
+}

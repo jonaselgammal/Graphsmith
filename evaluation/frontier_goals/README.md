@@ -3,9 +3,9 @@
 This suite is meant to probe where Graphsmith currently stops generalizing.
 
 It mixes:
-- tier 1: mixed-domain linear compositions that should now be within reach
-- tier 2: harder chains with generated predicates/transforms and cross-domain rewiring
-- tier 3: current boundary probes around loops, multi-generated plans, and external effects
+- tier 1: near-frontier linear chains that still ought to work
+- tier 2: looped or multi-generated chains that should currently fail cleanly
+- tier 3: broader boundary probes around conjunctions, multiple generated skills, and external effects
 
 Use:
 

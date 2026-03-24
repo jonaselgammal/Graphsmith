@@ -1,9 +1,0 @@
-{
-  "id": "f07",
-  "goal": "For each text, summarize it and check whether the summary contains a phrase",
-  "tier": 2,
-  "tags": ["loop", "llm", "predicate", "generated"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed"],
-  "notes": "Looped LLM stage plus generated predicate and extra input binding."
-}

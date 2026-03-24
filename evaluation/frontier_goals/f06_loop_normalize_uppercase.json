@@ -1,9 +1,0 @@
-{
-  "id": "f06",
-  "goal": "For each text, normalize it and convert it to uppercase",
-  "tier": 2,
-  "tags": ["loop", "text", "generated"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed"],
-  "notes": "Loop planning plus generated transform composition."
-}

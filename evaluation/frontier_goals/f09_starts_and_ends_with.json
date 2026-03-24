@@ -1,5 +1,5 @@
 {
-  "id": "f11",
+  "id": "f09",
   "goal": "Check whether normalized text both starts with a prefix and ends with a suffix",
   "tier": 3,
   "tags": ["text", "predicate", "multi_generated", "boundary"],

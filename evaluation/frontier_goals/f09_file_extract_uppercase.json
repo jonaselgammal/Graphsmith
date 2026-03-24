@@ -1,9 +1,0 @@
-{
-  "id": "f09",
-  "goal": "Read a JSON file from disk, extract the value field, and convert it to uppercase",
-  "tier": 3,
-  "tags": ["filesystem", "json", "text", "boundary"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed"],
-  "notes": "Filesystem boundary plus generated post-processing."
-}
