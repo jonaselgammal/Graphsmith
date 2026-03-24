@@ -35,6 +35,7 @@ class TestExtractSpec:
         ("check if text starts with prefix", "starts_with"),
         ("check ends with suffix", "ends_with"),
         ("check if text contains word", "contains"),
+        ("check whether keywords contain a phrase", "contains"),
         ("replace substring", "replace"),
         ("strip prefix from text", "strip_prefix"),
         ("remove suffix", "strip_suffix"),

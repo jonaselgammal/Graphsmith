@@ -569,6 +569,44 @@ class TestClosedLoopOrchestration:
         ]
         assert any(edge.to == "step_3.substring" and edge.from_ == "input.substring" for edge in result.replan_plan.graph.edges)
 
+    def test_multi_stage_fallback_handles_keyword_contains_phrase(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.contains.v1"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Normalize this text, extract keywords, and check whether the keywords contain a phrase",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "multi_stage_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert [node.config["skill_id"] for node in result.replan_plan.graph.nodes] == [
+            "text.normalize.v1",
+            "text.extract_keywords.v1",
+            "text.contains.v1",
+        ]
+        assert any(edge.to == "step_3.substring" and edge.from_ == "input.substring" for edge in result.replan_plan.graph.edges)
+
 
 # ── Format output ────────────────────────────────────────────────
 

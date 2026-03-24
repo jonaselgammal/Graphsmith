@@ -180,7 +180,7 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
         ],
     },
     "contains": {
-        "keywords": ["contains", "includes", "has substring"],
+        "keywords": ["contains", "contain", "includes", "has substring"],
         "category": "text", "family": "text_binary_predicate",
         "description": "Check if text contains a substring value.",
         "inputs": [{"name": "text", "type": "string"}, {"name": "substring", "type": "string"}],
