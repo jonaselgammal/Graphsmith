@@ -47,9 +47,11 @@ def main() -> int:
     failed = 0
     with tempfile.TemporaryDirectory() as tmpdir:
         out_root = Path(tmpdir)
-        for case in cases:
+        for index, case in enumerate(cases, start=1):
             goal = str(case["goal"])
-            ok, output = _run_case(case, out_root)
+            case_dir = out_root / f"case_{index:02d}"
+            case_dir.mkdir(parents=True, exist_ok=True)
+            ok, output = _run_case(case, case_dir)
             mark = "PASS" if ok else "FAIL"
             print(f"  [{mark}] {goal}")
             if not ok:

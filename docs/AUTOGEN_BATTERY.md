@@ -4,6 +4,7 @@ This battery is a small end-to-end check for automatic skill generation.
 
 It is intentionally narrow:
 - a few known-good prompts
+- a few harder paraphrases for known templates
 - one out-of-scope prompt
 - one no-match prompt
 
@@ -21,6 +22,17 @@ The runner uses:
 - a temporary output directory
 - the CLI entrypoint itself
 
+For the bounded closed-loop CLI path, run:
+
+```bash
+./scripts/autogen_closed_loop_smoke.sh
+```
+
+That smoke case uses `graphsmith solve` with the offline `echo` provider.
+It is expected to stop at `replan_failed`, but it should still prove that
+missing-skill detection, generation, validation, and stop-reason reporting
+are intact.
+
 ## What it checks
 
 For each prompt, it verifies:
@@ -31,6 +43,7 @@ For each prompt, it verifies:
 
 - A known-good prompt failing usually means generation, validation, or
   example testing regressed.
+- A paraphrase failing usually means template matching became too brittle.
 - An out-of-scope prompt succeeding usually means the safety boundary
   regressed.
 - A no-match prompt succeeding usually means template matching became

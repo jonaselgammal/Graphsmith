@@ -26,3 +26,11 @@ def test_positive_cases_define_template_key() -> None:
     positives = [case for case in cases if case["expected"] == "pass"]
     assert positives
     assert all(case.get("template_key") for case in positives)
+
+
+def test_battery_manifest_has_adversarial_coverage() -> None:
+    cases = json.loads(BATTERY.read_text(encoding="utf-8"))
+    goals = {case["goal"] for case in cases}
+    assert "convert this text to all caps" in goals
+    assert "find the middle value of numbers" in goals
+    assert "check whether this json key exists" in goals

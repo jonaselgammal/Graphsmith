@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from typer.testing import CliRunner
 
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanResult, UnresolvedHole
@@ -343,3 +344,22 @@ class TestFormatClosedLoopResult:
         text = format_closed_loop_result(r)
         assert "Failure stage: validation" in text
         assert "generated_skill_validation_failed" in text
+
+
+class TestClosedLoopCli:
+    def test_solve_with_echo_provider_shows_generation_and_stop_reason(self) -> None:
+        from graphsmith.cli.main import app
+
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            "solve",
+            "compute the median of numbers",
+            "--provider", "echo",
+            "--auto-approve",
+        ])
+
+        assert result.exit_code == 0
+        assert "Closed-Loop Result" in result.output
+        assert "Generated: math.median.v1" in result.output
+        assert "Validation: PASS" in result.output
+        assert "Stopped: replan_failed" in result.output

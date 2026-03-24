@@ -37,6 +37,11 @@ With auto-approve (skip confirmation):
 graphsmith solve "compute the median of numbers" --auto-approve
 ```
 
+Offline smoke path:
+```bash
+graphsmith solve "compute the median of numbers" --provider echo --auto-approve
+```
+
 ### Example output
 
 ```
@@ -92,6 +97,11 @@ explicit. Common stop reasons are:
 - user declined confirmation
 - publish failed
 - replan failed after publication
+
+For smoke testing, `--provider echo` is useful because it exercises the
+bounded loop without a live API key. In that mode, a stop reason of
+`replan_failed` is expected: generation and validation still run, but the
+echo provider does not produce a usable replan.
 
 ## Limitations
 
