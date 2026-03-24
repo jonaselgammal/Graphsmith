@@ -52,6 +52,10 @@ class TestAnthropicLive:
             f"Expected success/partial but got {result.status}: "
             f"{result.holes}"
         )
+        assert result.retrieval is not None
+        assert result.retrieval.registry_size > 0
+        assert result.retrieval.candidate_count > 0
+        assert "text.summarize.v1" in result.retrieval.candidates
 
         if result.graph is not None:
             pkg = glue_to_skill_package(result.graph)
@@ -131,3 +135,7 @@ class TestOpenAILive:
             f"Expected success/partial but got {result.status}: "
             f"{result.holes}"
         )
+        assert result.retrieval is not None
+        assert result.retrieval.registry_size > 0
+        assert result.retrieval.candidate_count > 0
+        assert "text.summarize.v1" in result.retrieval.candidates

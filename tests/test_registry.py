@@ -1,7 +1,10 @@
 """Tests for the local registry."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -89,6 +92,37 @@ class TestPublish:
         )
         entry, _ = reg.publish(tmp_path / "pkg")
         assert entry.id == "test.minimal.v1"
+
+    def test_publish_parallel_writers_do_not_clobber_index(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        reg_root = tmp_path / "registry"
+        barrier = threading.Barrier(3)
+        original_save_index = LocalRegistry._save_index
+
+        def delayed_save(self: LocalRegistry, entries: list[Any]) -> None:
+            time.sleep(0.05)
+            original_save_index(self, entries)
+
+        def publish_one(skill_dir: Path) -> None:
+            barrier.wait()
+            LocalRegistry(reg_root).publish(skill_dir)
+
+        monkeypatch.setattr(LocalRegistry, "_save_index", delayed_save)
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [
+                pool.submit(publish_one, EXAMPLE_DIR / "text.normalize.v1"),
+                pool.submit(publish_one, EXAMPLE_DIR / "text.title_case.v1"),
+                pool.submit(publish_one, EXAMPLE_DIR / "text.word_count.v1"),
+            ]
+            for future in futures:
+                future.result()
+
+        ids = {entry.id for entry in LocalRegistry(reg_root).list_all()}
+        assert ids == {
+            "text.normalize.v1",
+            "text.title_case.v1",
+            "text.word_count.v1",
+        }
 
 
 # ── fetch ────────────────────────────────────────────────────────────

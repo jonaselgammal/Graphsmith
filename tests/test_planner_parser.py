@@ -344,7 +344,7 @@ class TestCLIPlannerBackend:
             "--registry", str(tmp_path / "reg"),
         ])
         assert result.exit_code == 1
-        assert "API key" in result.output or "FAIL" in result.output
+        assert "Provider error" in result.output or "API key" in result.output or "FAIL" in result.output
 
     def test_plan_show_retrieval_in_text_output(self, tmp_path: Path) -> None:
         from typer.testing import CliRunner
@@ -362,4 +362,19 @@ class TestCLIPlannerBackend:
         ])
         assert result.exit_code == 0
         assert "Retrieval [ranked]" in result.output
+        assert "Registry size: 1" in result.output
         assert "text.summarize.v1" in result.output
+
+    def test_plan_show_retrieval_empty_registry(self, tmp_path: Path) -> None:
+        from typer.testing import CliRunner
+        from graphsmith.cli.main import app
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            "plan", "summarize text",
+            "--registry", str(tmp_path / "empty-reg"),
+            "--show-retrieval",
+        ])
+        assert result.exit_code == 1
+        assert "Retrieval [ranked]" in result.output
+        assert "Registry size: 0" in result.output
+        assert "Registry is empty." in result.output

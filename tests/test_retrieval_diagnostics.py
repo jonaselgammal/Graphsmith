@@ -41,6 +41,8 @@ class TestRetrievalDiagnostics:
         assert diag.mode == "ranked"
         assert len(diag.candidates) == len(cands)
         assert diag.candidate_count > 0
+        assert diag.registry_size > 0
+        assert diag.empty_registry is False
 
     def test_diagnostics_has_tokens(self, full_reg: LocalRegistry) -> None:
         diag, _ = retrieve_candidates_with_diagnostics(
@@ -54,6 +56,22 @@ class TestRetrievalDiagnostics:
             "extract keywords", full_reg,
         )
         assert len(diag.scores) > 0
+
+    def test_empty_registry_is_reported(self, tmp_path: Path) -> None:
+        diag, cands = retrieve_candidates_with_diagnostics(
+            "normalize text", LocalRegistry(tmp_path / "empty"),
+        )
+        assert cands == []
+        assert diag.registry_size == 0
+        assert diag.empty_registry is True
+        assert diag.fallback_used is False
+
+    def test_fallback_is_reported(self, full_reg: LocalRegistry) -> None:
+        diag, cands = retrieve_candidates_with_diagnostics(
+            "xyzzy zork gibberish", full_reg,
+        )
+        assert len(cands) > 0
+        assert diag.fallback_used is True
 
 
 class TestRetrievalModes:

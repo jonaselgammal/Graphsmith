@@ -59,6 +59,9 @@ class RetrievalDiagnostics(BaseModel):
     candidates: list[str] = Field(default_factory=list)
     scores: dict[str, int] = Field(default_factory=dict)
     candidate_count: int = 0
+    registry_size: int = 0
+    empty_registry: bool = False
+    fallback_used: bool = False
 
 
 def retrieve_candidates(
@@ -109,6 +112,8 @@ def _retrieve_ranked(
     diag = RetrievalDiagnostics(
         goal=goal, mode=mode_name,
         raw_tokens=raw_tokens, expanded_tokens=tokens,
+        registry_size=len(all_entries),
+        empty_registry=not all_entries,
     )
 
     if not tokens or not all_entries:
@@ -126,6 +131,7 @@ def _retrieve_ranked(
     results = [entry for score, entry in scored if score > 0]
     if not results:
         results = all_entries
+        diag.fallback_used = bool(all_entries)
     results = results[:max_candidates]
 
     diag.candidates = [e.id for e in results]
@@ -141,13 +147,14 @@ def _retrieve_broad(
 ) -> tuple[RetrievalDiagnostics, list[IndexEntry]]:
     """Broad retrieval: no stop words, no synonyms, substring matching."""
     raw_tokens = _tokenise_no_filter(goal)
+    all_entries = registry.list_all()
 
     diag = RetrievalDiagnostics(
         goal=goal, mode="broad",
         raw_tokens=raw_tokens, expanded_tokens=raw_tokens,
+        registry_size=len(all_entries),
+        empty_registry=not all_entries,
     )
-
-    all_entries = registry.list_all()
     seen: dict[tuple[str, str], IndexEntry] = {}
 
     for token in raw_tokens:
@@ -158,6 +165,7 @@ def _retrieve_broad(
 
     if not seen:
         results = all_entries
+        diag.fallback_used = bool(all_entries)
     else:
         results = sorted(seen.values(), key=lambda e: (e.id, e.version))
 

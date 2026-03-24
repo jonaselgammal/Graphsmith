@@ -461,6 +461,11 @@ def plan(
             f"\nRetrieval [{result.retrieval.mode}] "
             f"({result.retrieval.candidate_count} candidates):"
         )
+        typer.echo(f"  Registry size: {result.retrieval.registry_size}")
+        if result.retrieval.empty_registry:
+            typer.echo("  Registry is empty.")
+        elif result.retrieval.fallback_used:
+            typer.echo("  Fallback used: no positive lexical matches, returning registry entries.")
         if result.retrieval.raw_tokens:
             typer.echo(f"  Raw tokens: {', '.join(result.retrieval.raw_tokens)}")
         if result.retrieval.expanded_tokens:
