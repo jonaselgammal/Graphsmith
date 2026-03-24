@@ -1,8 +1,0 @@
-{
-  "id": "f08",
-  "goal": "Extract keywords from this text and then uppercase them",
-  "tier": 2,
-  "tags": ["text", "llm", "composition", "autogen_plus_existing"],
-  "expected_success": true,
-  "notes": "Generated transform after an existing extraction skill."
-}

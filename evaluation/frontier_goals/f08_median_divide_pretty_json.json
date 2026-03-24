@@ -1,0 +1,9 @@
+{
+  "id": "f08",
+  "goal": "Compute the median, divide it by another number, and pretty print it as JSON",
+  "tier": 2,
+  "tags": ["math", "json", "generated", "multi_missing"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected"],
+  "notes": "Multiple generated capabilities in one mixed math/JSON plan."
+}

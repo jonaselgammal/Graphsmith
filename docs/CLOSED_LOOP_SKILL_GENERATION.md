@@ -121,6 +121,10 @@ explicit. Common stop reasons are:
 - For simple text-only multi-stage goals, Graphsmith can now build a
   deterministic linear fallback graph that composes existing skills with the
   generated skill when full replan still fails.
+- Generated predicates/transforms like `contains`, `starts_with`, `replace`,
+  `strip_prefix`, and `strip_suffix` now expose their variable arguments as
+  real graph inputs instead of opaque config values, so they can participate in
+  composition and future repair more naturally.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of
@@ -134,6 +138,8 @@ echo provider does not produce a usable replan.
 - Cannot generate multi-step or LLM-dependent skills
 - Cannot handle cases where multiple skills are missing
 - Config-bearing generated skills inside larger plans are still the main weak spot
+- Semantic fidelity of bounded fallback graphs is now a more important frontier
+  concern than raw executability in some harder cases
 
 ## Files
 

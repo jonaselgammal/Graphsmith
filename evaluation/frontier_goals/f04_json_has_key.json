@@ -1,8 +1,0 @@
-{
-  "id": "f04",
-  "goal": "Check if this json has key",
-  "tier": 1,
-  "tags": ["json", "autogen", "single_missing"],
-  "expected_success": true,
-  "notes": "Predicate-style autogen capability."
-}

@@ -1,0 +1,8 @@
+{
+  "id": "f05",
+  "goal": "Extract keywords from this text and replace commas with newlines",
+  "tier": 2,
+  "tags": ["text", "llm", "generated", "formatting"],
+  "expected_success": true,
+  "notes": "Generated replace transform applied to extracted keyword text."
+}

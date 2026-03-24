@@ -40,6 +40,10 @@ class SkillSpec(BaseModel):
 # the operation-specific expression, not the full function body.
 
 _TEXT_UNARY_INPUT = [{"name": "text", "type": "string"}]
+_TEXT_BINARY_INPUT = [
+    {"name": "text", "type": "string"},
+    {"name": "value", "type": "string"},
+]
 _MATH_BINARY_INPUT = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
 _MATH_LIST_INPUT = [{"name": "values", "type": "string"}]
 _JSON_INPUT = [{"name": "raw_json", "type": "string"}]
@@ -155,75 +159,73 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
     # ── Text predicates ───────────────────────────────────────────
     "starts_with": {
         "keywords": ["starts with", "begins with", "start with"],
-        "category": "text", "family": "text_config_predicate",
-        "description": "Check if text starts with a prefix.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_predicate",
+        "description": "Check if text starts with a prefix value.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "prefix", "type": "string"}],
         "outputs": [{"name": "result", "type": "string"}],
-        "config": {"prefix": ""},
-        "code_body": 'prefix = config.get("prefix", "")\n    return {"result": str(str(text).startswith(prefix)).lower()}',
+        "code_body": 'prefix = str(inputs.get("prefix", ""))\n    return {"result": str(str(text).startswith(prefix)).lower()}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"result": "true"}},
+            {"input": {"text": "hello world", "prefix": "hello"}, "output": {"result": "true"}},
         ],
     },
     "ends_with": {
         "keywords": ["ends with", "end with"],
-        "category": "text", "family": "text_config_predicate",
-        "description": "Check if text ends with a suffix.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_predicate",
+        "description": "Check if text ends with a suffix value.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "suffix", "type": "string"}],
         "outputs": [{"name": "result", "type": "string"}],
-        "config": {"suffix": ""},
-        "code_body": 'suffix = config.get("suffix", "")\n    return {"result": str(str(text).endswith(suffix)).lower()}',
+        "code_body": 'suffix = str(inputs.get("suffix", ""))\n    return {"result": str(str(text).endswith(suffix)).lower()}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"result": "true"}},
+            {"input": {"text": "hello world", "suffix": "world"}, "output": {"result": "true"}},
         ],
     },
     "contains": {
         "keywords": ["contains", "includes", "has substring"],
-        "category": "text", "family": "text_config_predicate",
-        "description": "Check if text contains a substring.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_predicate",
+        "description": "Check if text contains a substring value.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "substring", "type": "string"}],
         "outputs": [{"name": "result", "type": "string"}],
-        "config": {"substring": ""},
-        "code_body": 'sub = config.get("substring", "")\n    return {"result": str(sub in str(text)).lower()}',
+        "code_body": 'sub = str(inputs.get("substring", ""))\n    return {"result": str(sub in str(text)).lower()}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"result": "true"}},
+            {"input": {"text": "hello world", "substring": "world"}, "output": {"result": "true"}},
         ],
     },
     # ── Text with config ──────────────────────────────────────────
     "replace": {
         "keywords": ["replace", "substitute"],
-        "category": "text", "family": "text_config_transform",
-        "description": "Replace occurrences of a substring.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_transform",
+        "description": "Replace occurrences of one substring with another.",
+        "inputs": [
+            {"name": "text", "type": "string"},
+            {"name": "old", "type": "string"},
+            {"name": "new", "type": "string"},
+        ],
         "outputs": [{"name": "replaced", "type": "string"}],
-        "config": {"old": "", "new": ""},
-        "code_body": 'old = config.get("old", "")\n    new = config.get("new", "")\n    return {"replaced": str(text).replace(old, new)}',
+        "code_body": 'old = str(inputs.get("old", ""))\n    new = str(inputs.get("new", ""))\n    return {"replaced": str(text).replace(old, new)}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"replaced": "hello world"}},
+            {"input": {"text": "hello world", "old": "world", "new": "there"}, "output": {"replaced": "hello there"}},
         ],
     },
     "strip_prefix": {
         "keywords": ["strip prefix", "remove prefix", "trim prefix"],
-        "category": "text", "family": "text_config_transform",
-        "description": "Remove a prefix from text if present.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_transform",
+        "description": "Remove a prefix value from text if present.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "prefix", "type": "string"}],
         "outputs": [{"name": "stripped", "type": "string"}],
-        "config": {"prefix": ""},
-        "code_body": 'prefix = config.get("prefix", "")\n    t = str(text)\n    return {"stripped": t[len(prefix):] if t.startswith(prefix) else t}',
+        "code_body": 'prefix = str(inputs.get("prefix", ""))\n    t = str(text)\n    return {"stripped": t[len(prefix):] if t.startswith(prefix) else t}',
         "examples": [
-            {"input": {"text": "prefix_hello"}, "output": {"stripped": "prefix_hello"}},
+            {"input": {"text": "prefix_hello", "prefix": "prefix_"}, "output": {"stripped": "hello"}},
         ],
     },
     "strip_suffix": {
         "keywords": ["strip suffix", "remove suffix", "trim suffix"],
-        "category": "text", "family": "text_config_transform",
-        "description": "Remove a suffix from text if present.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_transform",
+        "description": "Remove a suffix value from text if present.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "suffix", "type": "string"}],
         "outputs": [{"name": "stripped", "type": "string"}],
-        "config": {"suffix": ""},
-        "code_body": 'suffix = config.get("suffix", "")\n    t = str(text)\n    return {"stripped": t[:-len(suffix)] if suffix and t.endswith(suffix) else t}',
+        "code_body": 'suffix = str(inputs.get("suffix", ""))\n    t = str(text)\n    return {"stripped": t[:-len(suffix)] if suffix and t.endswith(suffix) else t}',
         "examples": [
-            {"input": {"text": "hello_suffix"}, "output": {"stripped": "hello_suffix"}},
+            {"input": {"text": "hello_suffix", "suffix": "_suffix"}, "output": {"stripped": "hello"}},
         ],
     },
     # ── Math binary ───────────────────────────────────────────────
@@ -498,8 +500,8 @@ def generate_op_code(spec: SkillSpec) -> str:
         f'def {func_name}(config: dict, inputs: dict) -> dict:',
         f'    """{spec.description}"""',
     ]
-    if len(input_names) == 1 and input_names[0] == "text":
-        lines.append('    text = inputs.get("text", "")')
+    for input_name in input_names:
+        lines.append(f'    {input_name} = inputs.get("{input_name}", "")')
     lines.append(f'    {code_body}')
 
     return "\n".join(lines)
@@ -571,17 +573,15 @@ def register_generated_op(spec: SkillSpec) -> None:
     input_names = [inp["name"] for inp in spec.inputs]
     func_name = spec.op_name.replace(".", "_")
 
-    if len(input_names) == 1 and input_names[0] == "text":
-        exec_code = (
-            f"def {func_name}(config, inputs):\n"
-            f'    text = inputs.get("text", "")\n'
-            f"    {code_body}\n"
-        )
-    else:
-        exec_code = (
-            f"def {func_name}(config, inputs):\n"
-            f"    {code_body}\n"
-        )
+    binding_lines = "".join(
+        f'    {input_name} = inputs.get("{input_name}", "")\n'
+        for input_name in input_names
+    )
+    exec_code = (
+        f"def {func_name}(config, inputs):\n"
+        f"{binding_lines}"
+        f"    {code_body}\n"
+    )
 
     namespace: dict[str, Any] = {}
     exec(exec_code, namespace)  # noqa: S102 — controlled template code only

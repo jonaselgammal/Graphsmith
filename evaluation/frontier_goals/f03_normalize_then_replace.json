@@ -1,0 +1,8 @@
+{
+  "id": "f03",
+  "goal": "Normalize this text and replace one substring with another",
+  "tier": 1,
+  "tags": ["text", "generated", "transform"],
+  "expected_success": true,
+  "notes": "Generated replace transform with two grounded arguments after an existing skill."
+}

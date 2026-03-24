@@ -3,9 +3,9 @@
 This suite is meant to probe where Graphsmith currently stops generalizing.
 
 It mixes:
-- tier 1: single missing deterministic skills outside the example text domain
-- tier 2: compositions that combine generated deterministic skills with existing example skills
-- tier 3: boundary probes that are expected to fail cleanly or remain unstable
+- tier 1: mixed-domain linear compositions that should now be within reach
+- tier 2: harder chains with generated predicates/transforms and cross-domain rewiring
+- tier 3: current boundary probes around loops, multi-generated plans, and external effects
 
 Use:
 

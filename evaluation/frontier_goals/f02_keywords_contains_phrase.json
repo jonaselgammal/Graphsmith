@@ -1,0 +1,8 @@
+{
+  "id": "f02",
+  "goal": "Normalize this text, extract keywords, and check whether the keywords contain a phrase",
+  "tier": 1,
+  "tags": ["text", "llm", "predicate", "generated"],
+  "expected_success": true,
+  "notes": "Existing keyword extraction composed with generated contains predicate."
+}

@@ -89,6 +89,11 @@ class TestGenerateCode:
         code = generate_op_code(extract_spec("json has key"))
         assert "def json_has_key" in code
 
+    def test_contains_uses_input_not_config(self) -> None:
+        code = generate_op_code(extract_spec("contains substring"))
+        assert 'inputs.get("substring"' in code
+        assert 'config.get("substring"' not in code
+
 
 # ── File generation ───────────────────────────────────────────────
 
@@ -113,6 +118,12 @@ class TestGenerateFiles:
             path = generate_skill_files(extract_spec("minimum"), tmpdir)
             content = (path / "graph.yaml").read_text()
             assert "op: math.min" in content
+
+    def test_contains_skill_has_substring_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = generate_skill_files(extract_spec("contains substring"), tmpdir)
+            content = (path / "skill.yaml").read_text()
+            assert "name: substring" in content
 
 
 # ── Validation + testing (all templates) ──────────────────────────

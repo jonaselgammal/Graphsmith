@@ -182,8 +182,8 @@ def _is_multi_stage_goal(goal: str) -> bool:
 
 
 def _can_use_generated_in_composition(spec: SkillSpec) -> bool:
-    """Only allow deterministic composition fallback for config-free transforms."""
-    return not spec.config
+    """Allow bounded composition fallback for generated skills with real ports."""
+    return True
 
 
 def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
@@ -243,28 +243,51 @@ def _build_linear_pipeline_plan(
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
 
-    graph_inputs = [
-        IOField(name=field.name, type=field.type)
-        for field in first_pkg.skill.inputs
-    ]
+    input_fields: dict[str, IOField] = {}
+
+    def ensure_graph_input(field) -> None:
+        if field.name not in input_fields:
+            input_fields[field.name] = IOField(
+                name=field.name,
+                type=field.type,
+                required=field.required,
+            )
+
+    def choose_upstream_input(required_inputs, prev_output_name: str):
+        by_name = {field.name: field for field in required_inputs}
+        for preferred in ("text", "lines", "raw_json", "values"):
+            if preferred in by_name:
+                return by_name[preferred]
+        if prev_output_name in by_name:
+            return by_name[prev_output_name]
+        if len(required_inputs) == 1:
+            return required_inputs[0]
+        return None
 
     for idx, pkg in enumerate(packages):
         node_id = f"step_{idx + 1}"
         nodes.append(GraphNode(id=node_id, op="skill.invoke", config={"skill_id": pkg.skill.id}))
         required_inputs = [field for field in pkg.skill.inputs if field.required]
         if idx == 0:
-            for field in pkg.skill.inputs:
+            for field in required_inputs:
+                ensure_graph_input(field)
                 edges.append(GraphEdge(from_=f"input.{field.name}", to=f"{node_id}.{field.name}"))
             continue
-        if len(required_inputs) != 1:
-            return None
         prev_pkg = packages[idx - 1]
         if not prev_pkg.skill.outputs:
             return None
         upstream_port = prev_pkg.skill.outputs[0].name
+        upstream_input = choose_upstream_input(required_inputs, upstream_port)
+        if upstream_input is None:
+            return None
         edges.append(
-            GraphEdge(from_=f"step_{idx}.{upstream_port}", to=f"{node_id}.{required_inputs[0].name}")
+            GraphEdge(from_=f"step_{idx}.{upstream_port}", to=f"{node_id}.{upstream_input.name}")
         )
+        for field in required_inputs:
+            if field.name == upstream_input.name:
+                continue
+            ensure_graph_input(field)
+            edges.append(GraphEdge(from_=f"input.{field.name}", to=f"{node_id}.{field.name}"))
 
     last_pkg = packages[-1]
     graph_outputs = {
@@ -275,7 +298,7 @@ def _build_linear_pipeline_plan(
 
     return GlueGraph(
         goal=goal,
-        inputs=graph_inputs,
+        inputs=list(input_fields.values()),
         outputs=outputs,
         effects=sorted({effect for pkg in packages for effect in pkg.skill.effects}),
         graph=GraphBody(version=1, nodes=nodes, edges=edges, outputs=graph_outputs),

@@ -1,0 +1,9 @@
+{
+  "id": "f10",
+  "goal": "Normalize this text, summarize it, convert the summary to uppercase, and check whether it contains a phrase",
+  "tier": 3,
+  "tags": ["text", "llm", "generated", "multi_stage"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected"],
+  "notes": "Four-stage plan requiring more than the current bounded linear fallback."
+}

@@ -1,8 +1,0 @@
-{
-  "id": "f12",
-  "goal": "Normalize this text, summarize it, and check whether the summary contains a phrase",
-  "tier": 3,
-  "tags": ["text", "llm", "predicate", "boundary"],
-  "expected_success": true,
-  "notes": "Three-stage mixed-domain composition with one generated predicate skill."
-}

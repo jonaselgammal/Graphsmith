@@ -1,8 +1,0 @@
-{
-  "id": "f02",
-  "goal": "Divide two numbers",
-  "tier": 1,
-  "tags": ["math", "autogen", "single_missing"],
-  "expected_success": true,
-  "notes": "Binary arithmetic autogen path."
-}

@@ -1,0 +1,8 @@
+{
+  "id": "f01",
+  "goal": "Parse this JSON, extract the value field, and convert it to uppercase",
+  "tier": 1,
+  "tags": ["json", "text", "generated", "composition"],
+  "expected_success": true,
+  "notes": "Existing JSON extraction composed with generated uppercase."
+}

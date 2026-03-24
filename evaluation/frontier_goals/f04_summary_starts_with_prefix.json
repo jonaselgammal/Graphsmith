@@ -1,0 +1,8 @@
+{
+  "id": "f04",
+  "goal": "Summarize this text and check whether the summary starts with a prefix",
+  "tier": 1,
+  "tags": ["text", "llm", "predicate", "generated"],
+  "expected_success": true,
+  "notes": "Generated starts_with predicate after an LLM summarization skill."
+}

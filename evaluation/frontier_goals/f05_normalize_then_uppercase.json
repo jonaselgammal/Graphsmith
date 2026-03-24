@@ -1,8 +1,0 @@
-{
-  "id": "f05",
-  "goal": "Normalize this text and then convert it to uppercase",
-  "tier": 2,
-  "tags": ["text", "composition", "autogen_plus_existing"],
-  "expected_success": true,
-  "notes": "Mixed composition with one generated skill and one existing skill."
-}
