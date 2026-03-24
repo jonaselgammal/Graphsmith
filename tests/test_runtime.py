@@ -9,6 +9,9 @@ import pytest
 from graphsmith.exceptions import ExecutionError
 from graphsmith.ops.llm_provider import EchoLLMProvider
 from graphsmith.parser import load_skill_package
+from graphsmith.planner.compiler import compile_ir
+from graphsmith.planner.ir import IRBlock, IRInput, IROutputRef, IRSource, IRStep, PlanningIR
+from graphsmith.planner.composer import glue_to_skill_package
 from graphsmith.runtime import run_skill_package, topological_order
 from graphsmith.registry import LocalRegistry
 from graphsmith.validator import validate_skill_package
@@ -415,3 +418,83 @@ class TestBoundedIteration:
 
         with pytest.raises(ExecutionError, match="exceeds configured limit 1"):
             run_skill_package(pkg, {"items": ["a", "b"]})
+
+    def test_loop_block_executes_and_collects_named_outputs(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        ir = PlanningIR(
+            goal="normalize items",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="normalize_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[
+                        IRStep(
+                            name="normalize",
+                            skill_id="text.normalize.v1",
+                            sources={"text": IRSource(step="input", port="text")},
+                        )
+                    ],
+                    final_outputs={"normalized": IROutputRef(step="normalize", port="normalized")},
+                    max_items=10,
+                )
+            ],
+            final_outputs={"normalized": IROutputRef(step="normalize_each", port="normalized")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        pkg = glue_to_skill_package(glue)
+        validate_skill_package(pkg)
+
+        result = run_skill_package(pkg, {"items": ["  Alice ", "Bob  "]}, registry=reg)
+        assert result.outputs == {"normalized": ["alice", "bob"]}
+        assert result.trace.nodes[0].op == "parallel.map"
+        assert result.trace.nodes[0].child_trace is not None
+        child = result.trace.nodes[0].child_trace
+        assert child is not None
+        assert len(child.nodes) == 2
+        assert child.nodes[0].node_id == "item_0"
+
+    def test_loop_block_can_use_outer_passthrough_inputs(self) -> None:
+        ir = PlanningIR(
+            goal="format items with prefix",
+            inputs=[IRInput(name="items", type="array<string>"), IRInput(name="prefix", type="string")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={
+                        "value": IRSource(binding="item"),
+                        "prefix": IRSource(step="input", port="prefix"),
+                    },
+                    steps=[
+                        IRStep(
+                            name="render",
+                            skill_id="template.render",
+                            sources={
+                                "value": IRSource(step="input", port="value"),
+                                "prefix": IRSource(step="input", port="prefix"),
+                            },
+                            config={"template": "{{prefix}}:{{value}}"},
+                        )
+                    ],
+                    final_outputs={"rendered": IROutputRef(step="render", port="rendered")},
+                    max_items=10,
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_each", port="rendered")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        pkg = glue_to_skill_package(glue)
+        validate_skill_package(pkg)
+
+        result = run_skill_package(pkg, {"items": ["a", "b"], "prefix": "item"})
+        assert result.outputs == {"rendered": ["item:a", "item:b"]}

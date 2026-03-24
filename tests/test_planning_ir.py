@@ -304,6 +304,40 @@ class TestCompilerHappyPath:
         glue = compile_ir(ir)
         assert glue.graph.nodes[0].when == "!input.skip"
 
+    def test_loop_block_lowers_to_parallel_map(self) -> None:
+        ir = PlanningIR(
+            goal="normalize lines",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="normalize_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[
+                        IRStep(
+                            name="normalize",
+                            skill_id="text.normalize.v1",
+                            sources={"text": IRSource(step="input", port="text")},
+                        )
+                    ],
+                    final_outputs={"normalized": IROutputRef(step="normalize", port="normalized")},
+                    max_items=10,
+                )
+            ],
+            final_outputs={"normalized": IROutputRef(step="normalize_each", port="normalized")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        assert len(glue.graph.nodes) == 1
+        node = glue.graph.nodes[0]
+        assert node.op == "parallel.map"
+        assert node.config["mode"] == "inline_graph"
+        assert node.config["max_items"] == 10
+        assert node.config["item_inputs"] == ["text"]
+        assert glue.graph.outputs["normalized"] == "normalize_each.normalized"
+
 
 # ── Compiler error tests ───────────────────────────────────────────
 
@@ -470,6 +504,26 @@ class TestCompilerErrors:
         with pytest.raises(UnsupportedControlFlowError, match="branch"):
             compile_ir(ir)
 
+    def test_loop_block_requires_collection(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="loop_it",
+                    kind="loop",
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[IRStep(name="normalize", skill_id="text.normalize.v1",
+                                  sources={"text": IRSource(step="input", port="text")})],
+                    final_outputs={"normalized": IROutputRef(step="normalize", port="normalized")},
+                )
+            ],
+            final_outputs={"normalized": IROutputRef(step="loop_it", port="normalized")},
+        )
+        with pytest.raises(CompilerError, match="missing collection source"):
+            compile_ir(ir)
+
     def test_compiler_error_has_phase(self) -> None:
         err = DuplicateStepError("foo")
         assert err.phase == "validate_ir"
@@ -563,6 +617,7 @@ class TestIRParser:
                 {
                     "name": "loop_block",
                     "kind": "loop",
+                    "collection": "input.text",
                     "steps": [
                         {"name": "inner", "skill_id": "text.normalize.v1", "sources": {"text": "input.text"}}
                     ],
@@ -573,6 +628,7 @@ class TestIRParser:
         }
         ir = parse_ir_output(json.dumps(data), goal="test")
         assert ir.blocks[0].kind == "loop"
+        assert ir.blocks[0].collection is not None
         assert ir.blocks[0].final_outputs["normalized"].step == "inner"
 
     def test_parse_when_and_unless(self) -> None:

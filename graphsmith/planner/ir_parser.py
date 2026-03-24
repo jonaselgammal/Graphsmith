@@ -129,6 +129,7 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
             IRBlock(
                 name=block["name"],
                 kind=block["kind"],
+                collection=_normalize_source(block["collection"]) if "collection" in block else None,
                 inputs={
                     port: _normalize_source(src)
                     for port, src in block.get("inputs", {}).items()
@@ -138,6 +139,7 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
                     block.get("final_outputs", {}),
                     block_step_names,
                 ),
+                max_items=int(block.get("max_items", 100)),
                 config=block.get("config", {}),
             )
         )
