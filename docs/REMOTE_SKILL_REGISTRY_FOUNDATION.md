@@ -38,6 +38,17 @@ backed, but it models the metadata shape of a shared AI-native skill network:
 This is intentionally enough to exercise retrieval, fetch, provenance, and
 local-plus-remote aggregation before designing a real service.
 
+### HTTP client and API payloads
+
+Graphsmith now also has a first explicit remote API boundary:
+
+- `graphsmith/registry/api.py` for publish/search/fetch payload models
+- `graphsmith/registry/client.py` for an HTTP-backed `RemoteRegistryClient`
+
+The current tests use an in-process mock HTTP transport rather than a real
+network server, but the registry client codepath is now separate from the
+filesystem mock.
+
 ### Aggregated registry
 
 `AggregatedRegistry` merges one preferred local registry with zero or more

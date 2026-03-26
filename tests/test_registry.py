@@ -1,4 +1,4 @@
-"""Tests for local, remote, and aggregated registries."""
+"""Tests for local, remote, aggregated, and HTTP-backed registries."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from graphsmith.exceptions import ParseError, RegistryError, ValidationError
-from graphsmith.registry import AggregatedRegistry, FileRemoteRegistry, LocalRegistry
+from graphsmith.registry import (
+    AggregatedRegistry,
+    FileRemoteRegistry,
+    LocalRegistry,
+    RemoteRegistryClient,
+)
 
 from conftest import (
     EXAMPLE_DIR,
@@ -231,6 +236,47 @@ class TestAggregatedRegistry:
         [entry] = agg.search("summarize")
         assert entry.source_kind == "local"
         assert entry.registry_id == str(reg.root)
+
+
+class TestRemoteRegistryClient:
+    def test_manifest_round_trip(self, remote_registry_server) -> None:
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=remote_registry_server["transport"],
+        )
+        manifest = client.manifest
+        assert manifest.registry_id == "mock-http-remote"
+        assert manifest.owner == "graphsmith-tests"
+
+    def test_publish_fetch_and_search_round_trip(self, remote_registry_server) -> None:
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=remote_registry_server["transport"],
+        )
+        entry, warnings = client.publish(EXAMPLE_DIR / "text.summarize.v1")
+        assert warnings == []
+        assert entry.id == "text.summarize.v1"
+        assert entry.source_kind == "remote"
+        results = client.search("summarize")
+        assert [item.id for item in results] == ["text.summarize.v1"]
+        pkg = client.fetch("text.summarize.v1", "1.0.0")
+        assert pkg.skill.id == "text.summarize.v1"
+        assert len(pkg.graph.nodes) == 2
+
+    def test_aggregated_registry_uses_http_remote(
+        self,
+        reg: LocalRegistry,
+        remote_registry_server,
+    ) -> None:
+        reg.publish(EXAMPLE_DIR / "text.word_count.v1")
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=remote_registry_server["transport"],
+        )
+        client.publish(EXAMPLE_DIR / "text.summarize.v1")
+        agg = AggregatedRegistry(reg, [client])
+        ids = [entry.id for entry in agg.search("")]
+        assert ids == ["text.summarize.v1", "text.word_count.v1"]
 
 
 # ── search ───────────────────────────────────────────────────────────

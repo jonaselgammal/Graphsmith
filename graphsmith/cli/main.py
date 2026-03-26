@@ -1175,7 +1175,12 @@ def _make_registry_backend(
     *,
     create_temp_local: bool = False,
 ) -> Any:
-    from graphsmith.registry import AggregatedRegistry, FileRemoteRegistry, LocalRegistry
+    from graphsmith.registry import (
+        AggregatedRegistry,
+        FileRemoteRegistry,
+        LocalRegistry,
+        RemoteRegistryClient,
+    )
 
     if registry_root:
         local = LocalRegistry(registry_root)
@@ -1186,7 +1191,10 @@ def _make_registry_backend(
 
     if not remote_registry_root:
         return local
-    remote = FileRemoteRegistry(remote_registry_root)
+    if remote_registry_root.startswith(("http://", "https://")):
+        remote = RemoteRegistryClient(remote_registry_root)
+    else:
+        remote = FileRemoteRegistry(remote_registry_root)
     return AggregatedRegistry(local, [remote])
 
 
