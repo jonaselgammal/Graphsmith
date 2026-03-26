@@ -99,6 +99,10 @@ Missing pieces:
 - version resolution beyond exact `(id, version)`
 - moderation / abuse controls
 
+For the proposed next-step service and protocol shape, see:
+
+- `docs/REMOTE_SKILL_REGISTRY_V1_DESIGN.md`
+
 ## Why this layer matters
 
 The long-term skill network should be optimized for machine reuse rather than
