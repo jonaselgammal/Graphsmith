@@ -7,6 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from graphsmith.cli.main import app
+from graphsmith.registry import FileRemoteRegistry
 from conftest import EXAMPLE_DIR, minimal_examples, minimal_graph, minimal_skill, write_package
 
 runner = CliRunner()
@@ -247,6 +248,25 @@ def test_search_with_filter(tmp_path: Path) -> None:
     assert data[0]["id"] == "text.summarize.v1"
 
 
+def test_search_includes_remote_registry_results(tmp_path: Path) -> None:
+    local_root = tmp_path / "local-reg"
+    remote_root = tmp_path / "remote-reg"
+    FileRemoteRegistry(remote_root).publish(EXAMPLE_DIR / "text.word_count.v1")
+    result = runner.invoke(
+        app,
+        [
+            "search", "count",
+            "--registry", str(local_root),
+            "--remote-registry", str(remote_root),
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["id"] == "text.word_count.v1"
+    assert data[0]["source_kind"] == "remote"
+
+
 # ── show ─────────────────────────────────────────────────────────────
 
 
@@ -272,6 +292,24 @@ def test_show_not_found(tmp_path: Path) -> None:
         ["show", "nonexistent", "--version", "1.0.0", "--registry", str(reg_root)],
     )
     assert result.exit_code == 1
+
+
+def test_show_fetches_remote_only_skill(tmp_path: Path) -> None:
+    local_root = tmp_path / "local-reg"
+    remote_root = tmp_path / "remote-reg"
+    FileRemoteRegistry(remote_root).publish(EXAMPLE_DIR / "text.word_count.v1")
+    result = runner.invoke(
+        app,
+        [
+            "show", "text.word_count.v1",
+            "--version", "1.0.0",
+            "--registry", str(local_root),
+            "--remote-registry", str(remote_root),
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["id"] == "text.word_count.v1"
 
 
 # ── plan ─────────────────────────────────────────────────────────────

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from graphsmith.planner.models import GlueGraph
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.registry.local import LocalRegistry
 from graphsmith.skills.closed_loop import run_closed_loop
 
@@ -121,14 +121,14 @@ def _evaluate_structure(case: FrontierCase, graph: GlueGraph | None, result) -> 
 
 def evaluate_frontier_case(
     case: FrontierCase,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: object,
 ) -> FrontierCaseResult:
     with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as regdir:
-        base_root = registry.root
-        if base_root.exists():
-            shutil.copytree(base_root, regdir, dirs_exist_ok=True)
         case_registry = LocalRegistry(regdir)
+        for entry in registry.list_all():
+            pkg = registry.fetch(entry.id, entry.version)
+            case_registry.publish(pkg.root_path)
         result = run_closed_loop(
             case.goal,
             backend,
@@ -182,7 +182,7 @@ def evaluate_frontier_case(
 
 def run_frontier_suite(
     cases: list[FrontierCase],
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: object,
     *,
     provider_name: str = "",

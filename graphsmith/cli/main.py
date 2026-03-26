@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -304,11 +305,13 @@ def search(
         None, "--registry",
         help="Custom registry root (default: ~/.graphsmith/registry).",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
 ) -> None:
     """Search published skills in the local registry."""
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     results = reg.search(
         query,
         effect=effect,
@@ -335,11 +338,13 @@ def show(
         None, "--registry",
         help="Custom registry root (default: ~/.graphsmith/registry).",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
 ) -> None:
     """Show details of a published skill."""
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     try:
         pkg = reg.fetch(skill_id, version)
     except RegistryError as exc:
@@ -375,6 +380,10 @@ def plan(
     registry_root: Optional[str] = typer.Option(
         None, "--registry",
         help="Custom registry root (default: ~/.graphsmith/registry).",
+    ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
     ),
     max_candidates: int = typer.Option(
         20, "--max-candidates",
@@ -419,9 +428,7 @@ def plan(
 ) -> None:
     """Plan a glue graph from a natural-language goal."""
     from graphsmith.planner import compose_plan, save_plan
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
     )
@@ -517,6 +524,10 @@ def plan_and_run(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Custom registry root.",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     backend: str = typer.Option("auto", "--backend", help="Planner backend: auto, mock, llm, or ir."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM ops."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai."),
@@ -533,11 +544,10 @@ def plan_and_run(
     """Plan a glue graph and execute it in one step."""
     from graphsmith.ops.llm_provider import EchoLLMProvider
     from graphsmith.planner import compose_plan, run_glue_graph
-    from graphsmith.registry import LocalRegistry
     from graphsmith.traces import TraceStore
 
     inputs = _resolve_inputs(input, input_file)
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
     )
@@ -612,18 +622,21 @@ def run_plan_cmd(
     ),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM ops."),
     registry_root: Optional[str] = typer.Option(None, "--registry", help="Custom registry root."),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     trace_root: Optional[str] = typer.Option(None, "--trace-root", help="Persist trace."),
     trace: bool = typer.Option(False, "--trace", help="Print trace after outputs."),
 ) -> None:
     """Run a previously saved plan."""
     from graphsmith.ops.llm_provider import EchoLLMProvider
     from graphsmith.planner import load_plan, run_glue_graph
-    from graphsmith.registry import LocalRegistry
     from graphsmith.traces import TraceStore
 
     inputs = _resolve_inputs(input, input_file)
     llm_provider = EchoLLMProvider(prefix="") if mock_llm else None
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
 
     try:
         glue = load_plan(path)
@@ -817,6 +830,10 @@ def promote_candidates(
 def solve(
     goal: str = typer.Argument(help="Natural-language goal to solve with closed-loop generation."),
     registry: Optional[str] = typer.Option(None, "--registry", help="Registry root with published skills."),
+    remote_registry: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai, groq, or ollama."),
     model: Optional[str] = typer.Option(None, "--model", help="Model name override for supported providers."),
@@ -828,12 +845,9 @@ def solve(
     output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Directory for generated skill files."),
 ) -> None:
     """Attempt bounded closed-loop missing-skill generation and replanning."""
-    import tempfile
-
-    from graphsmith.registry import LocalRegistry
     from graphsmith.skills.closed_loop import format_closed_loop_result, run_closed_loop
 
-    reg = LocalRegistry(registry) if registry else LocalRegistry(Path(tempfile.mkdtemp()))
+    reg = _make_registry_backend(registry, remote_registry, create_temp_local=True)
     planner_backend = _make_planner_backend(
         backend,
         mock_llm,
@@ -943,6 +957,10 @@ def eval_planner(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Registry root with published skills.",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     backend: str = typer.Option("auto", "--backend", help="Planner backend: auto, mock, llm (direct graph), or ir (semantic IR + compiler + reranking)."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
@@ -966,9 +984,7 @@ def eval_planner(
     Recommended: --backend ir --ir-candidates 3 --decompose
     """
     from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
         ir_candidates=ir_candidates, use_decomposition=use_decomposition,
@@ -1102,6 +1118,10 @@ def eval_frontier(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Registry root with published skills.",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
@@ -1113,9 +1133,7 @@ def eval_frontier(
 ) -> None:
     """Run the cross-domain frontier suite through the closed-loop solve path."""
     from graphsmith.evaluation.frontier_eval import load_frontier_cases, run_frontier_suite
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
         ir_candidates=ir_candidates, use_decomposition=use_decomposition,
@@ -1149,6 +1167,27 @@ def eval_frontier(
 
 
 # ── helpers ──────────────────────────────────────────────────────────
+
+
+def _make_registry_backend(
+    registry_root: str | None,
+    remote_registry_root: str | None = None,
+    *,
+    create_temp_local: bool = False,
+) -> Any:
+    from graphsmith.registry import AggregatedRegistry, FileRemoteRegistry, LocalRegistry
+
+    if registry_root:
+        local = LocalRegistry(registry_root)
+    elif create_temp_local:
+        local = LocalRegistry(Path(tempfile.mkdtemp()))
+    else:
+        local = LocalRegistry()
+
+    if not remote_registry_root:
+        return local
+    remote = FileRemoteRegistry(remote_registry_root)
+    return AggregatedRegistry(local, [remote])
 
 
 def _resolve_inputs(

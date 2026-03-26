@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from graphsmith.planner.decomposition import decompose_deterministic
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
-from graphsmith.registry.local import LocalRegistry
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.skills.autogen import (
     AutogenError,
     SkillSpec,
@@ -115,7 +115,7 @@ def detect_missing_skill(
 
 
 def _find_registry_entry_by_id(
-    registry: LocalRegistry, skill_id: str,
+    registry: RegistryBackend, skill_id: str,
 ) -> IndexEntry | None:
     if not hasattr(registry, "list_all"):
         return None
@@ -130,7 +130,7 @@ def _find_registry_entry_by_id(
 
 def _prepend_exact_skill_candidate(
     candidates: Sequence[IndexEntry],
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     skill_id: str,
 ) -> list[IndexEntry]:
     """Prepend an exact matching skill candidate if it exists in the registry."""
@@ -219,14 +219,14 @@ def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
 
 
 def _find_registry_entry(
-    registry: LocalRegistry, skill_id: str,
+    registry: RegistryBackend, skill_id: str,
 ) -> IndexEntry | None:
     return _find_registry_entry_by_id(registry, skill_id)
 
 
 def _build_linear_pipeline_plan(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     skill_ids: list[str],
 ) -> GlueGraph | None:
     """Build a simple linear pipeline from exact skill ids.
@@ -317,7 +317,7 @@ def _build_linear_pipeline_plan(
 
 def _build_multi_stage_fallback_plan(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     generated_spec: SkillSpec,
 ) -> GlueGraph | None:
     """Build a bounded linear fallback for simple mixed compositions.
@@ -364,7 +364,7 @@ def _build_multi_stage_fallback_plan(
 def run_closed_loop(
     goal: str,
     backend: Any,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     output_dir: str | Path | None = None,
     auto_approve: bool = False,

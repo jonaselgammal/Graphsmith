@@ -1,4 +1,4 @@
-"""Candidate skill retrieval from the local registry."""
+"""Candidate skill retrieval from local or remote-backed registries."""
 from __future__ import annotations
 
 import re
@@ -6,8 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.registry.index import IndexEntry
-from graphsmith.registry.local import LocalRegistry
 
 _DEFAULT_MAX = 8
 
@@ -66,7 +66,7 @@ class RetrievalDiagnostics(BaseModel):
 
 def retrieve_candidates(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = _DEFAULT_MAX,
     mode: str = "ranked",
@@ -80,7 +80,7 @@ def retrieve_candidates(
 
 def retrieve_candidates_with_diagnostics(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = _DEFAULT_MAX,
     mode: str = "ranked",
@@ -98,7 +98,7 @@ def retrieve_candidates_with_diagnostics(
 
 def _retrieve_ranked(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = _DEFAULT_MAX,
     use_stems: bool = False,
@@ -141,7 +141,7 @@ def _retrieve_ranked(
 
 def _retrieve_broad(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = 15,
 ) -> tuple[RetrievalDiagnostics, list[IndexEntry]]:

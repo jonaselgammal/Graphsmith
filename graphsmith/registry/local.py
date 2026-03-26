@@ -74,6 +74,10 @@ class LocalRegistry:
                 optional_input_names=[f.name for f in pkg.skill.inputs if not f.required],
                 output_names=[f.name for f in pkg.skill.outputs],
                 published_at=datetime.now(timezone.utc).isoformat(),
+                source_kind="local",
+                registry_id=str(self._root),
+                registry_url=f"file://{self._root}",
+                manifest_version="1",
             )
             index.append(entry)
             self._save_index(index)

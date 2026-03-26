@@ -1,4 +1,4 @@
-"""Tests for the local registry."""
+"""Tests for local, remote, and aggregated registries."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from graphsmith.exceptions import ParseError, RegistryError, ValidationError
-from graphsmith.registry import LocalRegistry
+from graphsmith.registry import AggregatedRegistry, FileRemoteRegistry, LocalRegistry
 
 from conftest import (
     EXAMPLE_DIR,
@@ -27,6 +27,18 @@ def reg(tmp_path: Path) -> LocalRegistry:
     return LocalRegistry(root=tmp_path / "registry")
 
 
+@pytest.fixture()
+def remote_reg(tmp_path: Path) -> FileRemoteRegistry:
+    """A fresh file-backed remote registry in a tmp dir."""
+    return FileRemoteRegistry(
+        root=tmp_path / "remote-registry",
+        registry_id="test-remote",
+        registry_url="https://skills.example.test",
+        owner="graphsmith-tests",
+        trust_score=0.8,
+    )
+
+
 # ── publish ──────────────────────────────────────────────────────────
 
 
@@ -39,6 +51,9 @@ class TestPublish:
         assert "text" in entry.input_names
         assert "summary" in entry.output_names
         assert entry.published_at  # non-empty
+        assert entry.source_kind == "local"
+        assert entry.registry_id == str(reg.root)
+        assert entry.registry_url == f"file://{reg.root}"
 
     def test_publish_creates_files(self, reg: LocalRegistry) -> None:
         reg.publish(EXAMPLE_DIR / "text.summarize.v1")
@@ -158,6 +173,64 @@ class TestFetch:
         assert a.skill.id == b.skill.id
         assert a.skill.version == b.skill.version
         assert len(a.graph.nodes) == len(b.graph.nodes)
+
+
+class TestRemoteRegistry:
+    def test_publish_sets_remote_provenance(self, remote_reg: FileRemoteRegistry) -> None:
+        entry, _ = remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        assert entry.id == "text.summarize.v1"
+        assert entry.source_kind == "remote"
+        assert entry.registry_id == "test-remote"
+        assert entry.registry_url == "https://skills.example.test"
+        assert entry.publisher == "graphsmith-tests"
+        assert entry.trust_score == 0.8
+        assert entry.remote_ref == "test-remote:text.summarize.v1@1.0.0"
+
+    def test_fetch_remote_skill(self, remote_reg: FileRemoteRegistry) -> None:
+        remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        pkg = remote_reg.fetch("text.summarize.v1", "1.0.0")
+        assert pkg.skill.id == "text.summarize.v1"
+
+    def test_search_remote_skill(self, remote_reg: FileRemoteRegistry) -> None:
+        remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        results = remote_reg.search("summarize")
+        assert len(results) == 1
+        assert results[0].source_kind == "remote"
+
+
+class TestAggregatedRegistry:
+    def test_search_merges_local_and_remote(
+        self,
+        reg: LocalRegistry,
+        remote_reg: FileRemoteRegistry,
+    ) -> None:
+        reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        remote_reg.publish(EXAMPLE_DIR / "text.word_count.v1")
+        agg = AggregatedRegistry(reg, [remote_reg])
+        ids = [entry.id for entry in agg.search("")]
+        assert ids == ["text.summarize.v1", "text.word_count.v1"]
+
+    def test_fetch_falls_back_to_remote(
+        self,
+        reg: LocalRegistry,
+        remote_reg: FileRemoteRegistry,
+    ) -> None:
+        remote_reg.publish(EXAMPLE_DIR / "text.word_count.v1")
+        agg = AggregatedRegistry(reg, [remote_reg])
+        pkg = agg.fetch("text.word_count.v1", "1.0.0")
+        assert pkg.skill.id == "text.word_count.v1"
+
+    def test_search_prefers_local_entry_on_duplicate(
+        self,
+        reg: LocalRegistry,
+        remote_reg: FileRemoteRegistry,
+    ) -> None:
+        reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        agg = AggregatedRegistry(reg, [remote_reg])
+        [entry] = agg.search("summarize")
+        assert entry.source_kind == "local"
+        assert entry.registry_id == str(reg.root)
 
 
 # ── search ───────────────────────────────────────────────────────────

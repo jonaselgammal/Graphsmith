@@ -1,7 +1,7 @@
 """Registry index entry model."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,13 @@ class IndexEntry(BaseModel):
     optional_input_names: list[str] = Field(default_factory=list)
     output_names: list[str] = Field(default_factory=list)
     published_at: str = ""
+    source_kind: Literal["local", "remote"] = "local"
+    registry_id: str = ""
+    registry_url: str = ""
+    publisher: str = ""
+    trust_score: float | None = None
+    manifest_version: str = "1"
+    remote_ref: str = ""
 
     def matches_text(self, query: str) -> bool:
         """Case-insensitive substring match against searchable fields."""
@@ -56,3 +63,15 @@ class IndexEntry(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
+
+
+class RemoteRegistryManifest(BaseModel):
+    """Metadata describing a shared remote skill registry."""
+
+    registry_id: str
+    display_name: str = ""
+    registry_url: str = ""
+    description: str = ""
+    owner: str = ""
+    trust_score: float | None = None
+    manifest_version: str = "1"

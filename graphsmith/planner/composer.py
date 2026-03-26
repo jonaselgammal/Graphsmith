@@ -19,13 +19,13 @@ from graphsmith.planner.models import (
     PlanResult,
     UnresolvedHole,
 )
-from graphsmith.registry.local import LocalRegistry
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.validator import validate_skill_package
 
 
 def compose_plan(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: PlannerBackend,
     *,
     constraints: list[str] | None = None,
@@ -68,7 +68,7 @@ def compose_plan(
 def _validate_glue_graph(
     result: PlanResult,
     *,
-    registry: LocalRegistry | None = None,
+    registry: RegistryBackend | None = None,
 ) -> PlanResult:
     """Wrap the GlueGraph in a synthetic SkillPackage and validate it."""
     from graphsmith.planner.graph_repair import normalize_glue_graph_contracts
@@ -131,7 +131,7 @@ def run_glue_graph(
     inputs: dict[str, Any],
     *,
     llm_provider: LLMProvider | None = None,
-    registry: LocalRegistry | None = None,
+    registry: RegistryBackend | None = None,
 ) -> Any:
     """Validate and execute a GlueGraph. Returns an ExecutionResult.
 
