@@ -1,0 +1,17 @@
+{
+  "name": "graphsmith-remote-registry-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "wrangler": "^4.10.0"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  }
+}

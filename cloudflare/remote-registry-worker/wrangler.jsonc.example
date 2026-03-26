@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "graphsmith-remote-registry",
+  "main": "src/index.js",
+  "compatibility_date": "2026-03-26",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "REGISTRY_ID": "graphsmith-public",
+    "REGISTRY_DISPLAY_NAME": "Graphsmith Public Registry",
+    "REGISTRY_OWNER": "your-handle",
+    "REGISTRY_DESCRIPTION": "Shared Graphsmith skill registry",
+    "REGISTRY_TRUST_SCORE": "0.7"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "graphsmith-remote-registry",
+      "database_id": "replace-with-your-d1-database-id",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
