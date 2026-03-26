@@ -113,10 +113,7 @@ class RemoteRegistryClient:
             resp = RemotePackageResponse.model_validate(data)
             self._save_json(self._cache_registry_dir() / "manifest.json", resp.manifest.model_dump())
             self._cache_package(resp.entry, resp.files)
-            return remote_files_to_skill_package(
-                resp.files,
-                root_hint=f"{resp.manifest.registry_id}:{skill_id}@{version}",
-            )
+            return load_skill_package(self._package_cache_dir(skill_id, version))
         except RegistryError:
             cached = self._load_cached_package(skill_id, version)
             if cached is None:

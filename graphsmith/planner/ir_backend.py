@@ -144,7 +144,7 @@ class IRPlannerBackend:
         candidates: list[CandidateResult] = []
 
         for i in range(self._candidate_count):
-            cand = self._process_one_candidate(prompt, request.goal, i, decomp)
+            cand = self._process_one_candidate(prompt, request, i, decomp)
             candidates.append(cand)
 
         self._last_candidates = candidates
@@ -196,7 +196,7 @@ class IRPlannerBackend:
     def _process_one_candidate(
         self,
         prompt: str,
-        goal: str,
+        request: PlanRequest,
         index: int,
         decomp: SemanticDecomposition | None,
     ) -> CandidateResult:
@@ -207,7 +207,7 @@ class IRPlannerBackend:
                 index=index, status="provider_error", error=str(err.description),
             )
 
-        ir, err = self._parse(raw, goal)
+        ir, err = self._parse(raw, request.goal)
         if err:
             return CandidateResult(
                 index=index, status="parse_error", error=str(err.description),
@@ -219,7 +219,7 @@ class IRPlannerBackend:
                 index=index, status="compile_error", ir=ir, error=str(err.description),
             )
 
-        score = score_candidate(ir, goal, decomposition=decomp)
+        score = score_candidate(ir, request.goal, decomposition=decomp)
         return CandidateResult(
             index=index,
             status="compiled",
