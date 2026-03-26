@@ -94,6 +94,50 @@ function buildSearchText(entry) {
   ].join(" ").toLowerCase();
 }
 
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateSkillPackage(skill, graph, examples) {
+  if (!isObject(skill)) {
+    return "skill.yaml must be a mapping";
+  }
+  if (!skill.id || !skill.version || !skill.name || !skill.description) {
+    return "skill.yaml must contain id, name, version, and description";
+  }
+  if (!Array.isArray(skill.inputs) || !Array.isArray(skill.outputs) || !Array.isArray(skill.effects)) {
+    return "skill.yaml must contain inputs, outputs, and effects arrays";
+  }
+  for (const field of [...skill.inputs, ...skill.outputs]) {
+    if (!isObject(field) || !field.name || !("type" in field)) {
+      return "each skill input/output must contain name and type";
+    }
+  }
+  if (!isObject(graph)) {
+    return "graph.yaml must be a mapping";
+  }
+  if (graph.version !== 1) {
+    return "graph.yaml must currently use version 1";
+  }
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || !isObject(graph.outputs)) {
+    return "graph.yaml must contain nodes, edges, and outputs";
+  }
+  for (const node of graph.nodes) {
+    if (!isObject(node) || !node.id || !node.op) {
+      return "each graph node must contain id and op";
+    }
+  }
+  for (const edge of graph.edges) {
+    if (!isObject(edge) || !edge.from || !edge.to) {
+      return "each graph edge must contain from and to";
+    }
+  }
+  if (!isObject(examples) || !Array.isArray(examples.examples)) {
+    return "examples.yaml must contain an examples array";
+  }
+  return "";
+}
+
 async function handleManifest(request, env) {
   return jsonResponse(envManifest(env, new URL(request.url)));
 }
@@ -175,14 +219,19 @@ async function handlePublish(request, env) {
   }
 
   let skill;
+  let graph;
+  let examples;
   try {
     skill = YAML.parse(files.skill_yaml) || {};
+    graph = YAML.parse(files.graph_yaml) || {};
+    examples = YAML.parse(files.examples_yaml) || {};
   } catch {
-    return errorResponse("could not parse skill metadata", 400);
+    return errorResponse("could not parse package YAML", 400);
   }
 
-  if (!skill.id || !skill.version || !skill.name) {
-    return errorResponse("skill.yaml must contain id, name, and version", 400);
+  const validationError = validateSkillPackage(skill, graph, examples);
+  if (validationError) {
+    return errorResponse(validationError, 400);
   }
 
   const existing = await env.DB.prepare(

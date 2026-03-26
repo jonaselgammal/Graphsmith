@@ -245,6 +245,35 @@ def test_remote_publish_http_with_token(remote_registry_server, monkeypatch) -> 
     assert "Remote published" in result.output
 
 
+def test_remote_publish_http_skip_existing(remote_registry_server, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    first = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+            "--remote-token", remote_registry_server["publish_token"],
+        ],
+    )
+    assert first.exit_code == 0
+    second = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+            "--remote-token", remote_registry_server["publish_token"],
+            "--skip-existing",
+        ],
+    )
+    assert second.exit_code == 0
+    assert "Skipped existing" in second.output
+
+
 # ── search ───────────────────────────────────────────────────────────
 
 

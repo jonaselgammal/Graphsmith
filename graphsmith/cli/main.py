@@ -304,12 +304,20 @@ def remote_publish(
         None, "--remote-cache",
         help="Optional remote cache directory. Falls back to GRAPHSMITH_REMOTE_CACHE.",
     ),
+    skip_existing: bool = typer.Option(
+        False, "--skip-existing",
+        help="Treat already-published remote skills as a non-fatal success.",
+    ),
 ) -> None:
     """Publish a validated skill package to a remote registry."""
     reg = _make_remote_registry(remote_registry, remote_token=remote_token, remote_cache=remote_cache)
     try:
         entry, warnings = reg.publish(path)
     except (ParseError, ValidationError, RegistryError) as exc:
+        text = str(exc)
+        if skip_existing and ("(409)" in text or "already published" in text):
+            typer.secho(f"Skipped existing: {path}", fg=typer.colors.YELLOW)
+            return
         typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 

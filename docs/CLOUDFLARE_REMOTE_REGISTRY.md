@@ -121,11 +121,22 @@ graphsmith remote-publish examples/skills/text.word_count.v1 \
   --remote-registry https://your-worker.workers.dev
 ```
 
+Bulk publish with duplicate-safe behavior:
+
+```bash
+for d in examples/skills/*/; do
+  graphsmith remote-publish "$d" \
+    --remote-registry https://your-worker.workers.dev \
+    --skip-existing
+done
+```
+
 ## Current limitations
 
 - no object storage yet
 - no pagination yet
-- publish parser is intentionally lightweight
+- publish validation is still bounded, but now checks basic skill/graph/example
+  structure before indexing
 - no moderation workflow yet
 - no namespaces yet
 - no trust-aware ranking yet
