@@ -49,6 +49,20 @@ The current tests use an in-process mock HTTP transport rather than a real
 network server, but the registry client codepath is now separate from the
 filesystem mock.
 
+### Cache and auth hooks
+
+The HTTP client now also includes:
+
+- a filesystem-backed remote cache for fetched packages and search results
+- bearer-token support for authenticated remote publish
+- a dedicated `graphsmith remote-publish` CLI command
+
+The current cache is intentionally simple:
+
+- fetches are cached by remote base URL, skill ID, and version
+- search results are cached by exact query/filter payload
+- reads fall back to cached results when the remote is unavailable
+
 ### Aggregated registry
 
 `AggregatedRegistry` merges one preferred local registry with zero or more

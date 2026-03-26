@@ -210,6 +210,41 @@ def test_publish_bad_path(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
+def test_remote_publish_http_requires_token(remote_registry_server, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+        ],
+    )
+    assert result.exit_code == 1
+    assert "401" in result.output
+
+
+def test_remote_publish_http_with_token(remote_registry_server, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+            "--remote-token", remote_registry_server["publish_token"],
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Remote published" in result.output
+
+
 # ── search ───────────────────────────────────────────────────────────
 
 

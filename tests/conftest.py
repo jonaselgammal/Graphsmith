@@ -105,6 +105,7 @@ def remote_registry_server(tmp_path: Path):
         owner="graphsmith-tests",
         trust_score=0.7,
     )
+    publish_token = "test-remote-token"
     publish_counter = itertools.count(1)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -146,6 +147,9 @@ def remote_registry_server(tmp_path: Path):
             return httpx.Response(200, json=payload.model_dump())
 
         if request.method == "POST" and parsed.path == "/v1/skills":
+            auth = request.headers.get("Authorization", "")
+            if auth != f"Bearer {publish_token}":
+                return httpx.Response(401, json={"error": "missing or invalid bearer token"})
             try:
                 payload = json.loads(request.content.decode("utf-8"))
                 files = payload["files"]
@@ -171,4 +175,5 @@ def remote_registry_server(tmp_path: Path):
         "base_url": "https://mock-remote.test",
         "registry": registry,
         "transport": transport,
+        "publish_token": publish_token,
     }

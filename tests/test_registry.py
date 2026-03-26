@@ -7,6 +7,7 @@ import threading
 import time
 from typing import Any
 
+import httpx
 import pytest
 
 from graphsmith.exceptions import ParseError, RegistryError, ValidationError
@@ -251,6 +252,7 @@ class TestRemoteRegistryClient:
     def test_publish_fetch_and_search_round_trip(self, remote_registry_server) -> None:
         client = RemoteRegistryClient(
             remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
             transport=remote_registry_server["transport"],
         )
         entry, warnings = client.publish(EXAMPLE_DIR / "text.summarize.v1")
@@ -271,12 +273,67 @@ class TestRemoteRegistryClient:
         reg.publish(EXAMPLE_DIR / "text.word_count.v1")
         client = RemoteRegistryClient(
             remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
             transport=remote_registry_server["transport"],
         )
         client.publish(EXAMPLE_DIR / "text.summarize.v1")
         agg = AggregatedRegistry(reg, [client])
         ids = [entry.id for entry in agg.search("")]
         assert ids == ["text.summarize.v1", "text.word_count.v1"]
+
+    def test_publish_requires_bearer_token(self, remote_registry_server) -> None:
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=remote_registry_server["transport"],
+        )
+        with pytest.raises(RegistryError, match="401"):
+            client.publish(EXAMPLE_DIR / "text.summarize.v1")
+
+    def test_fetch_uses_cached_package_on_remote_failure(self, tmp_path: Path, remote_registry_server) -> None:
+        cache_root = tmp_path / "remote-cache"
+        online = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
+            transport=remote_registry_server["transport"],
+            cache_root=cache_root,
+        )
+        online.publish(EXAMPLE_DIR / "text.summarize.v1")
+        pkg = online.fetch("text.summarize.v1", "1.0.0")
+        assert pkg.skill.id == "text.summarize.v1"
+
+        def failing_transport(request):
+            return httpx.Response(503, json={"error": "offline"})
+
+        offline = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=httpx.MockTransport(failing_transport),
+            cache_root=cache_root,
+        )
+        cached_pkg = offline.fetch("text.summarize.v1", "1.0.0")
+        assert cached_pkg.skill.id == "text.summarize.v1"
+
+    def test_search_uses_cached_results_on_remote_failure(self, tmp_path: Path, remote_registry_server) -> None:
+        cache_root = tmp_path / "remote-cache"
+        online = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
+            transport=remote_registry_server["transport"],
+            cache_root=cache_root,
+        )
+        online.publish(EXAMPLE_DIR / "text.word_count.v1")
+        results = online.search("count")
+        assert [entry.id for entry in results] == ["text.word_count.v1"]
+
+        def failing_transport(request):
+            return httpx.Response(503, json={"error": "offline"})
+
+        offline = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=httpx.MockTransport(failing_transport),
+            cache_root=cache_root,
+        )
+        cached_results = offline.search("count")
+        assert [entry.id for entry in cached_results] == ["text.word_count.v1"]
 
 
 # ── search ───────────────────────────────────────────────────────────

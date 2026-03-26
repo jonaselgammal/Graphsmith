@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -286,6 +287,34 @@ def publish(
 
     typer.secho(
         f"Published: {entry.id} v{entry.version}", fg=typer.colors.GREEN
+    )
+    for w in warnings:
+        typer.secho(f"  Warning: {w}", fg=typer.colors.YELLOW, err=True)
+
+
+@app.command("remote-publish")
+def remote_publish(
+    path: str,
+    remote_registry: str = typer.Option(..., "--remote-registry", help="Remote registry URL or file-backed registry root."),
+    remote_token: Optional[str] = typer.Option(
+        None, "--remote-token",
+        help="Bearer token for remote publish. Falls back to GRAPHSMITH_REMOTE_TOKEN.",
+    ),
+    remote_cache: Optional[str] = typer.Option(
+        None, "--remote-cache",
+        help="Optional remote cache directory. Falls back to GRAPHSMITH_REMOTE_CACHE.",
+    ),
+) -> None:
+    """Publish a validated skill package to a remote registry."""
+    reg = _make_remote_registry(remote_registry, remote_token=remote_token, remote_cache=remote_cache)
+    try:
+        entry, warnings = reg.publish(path)
+    except (ParseError, ValidationError, RegistryError) as exc:
+        typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.secho(
+        f"Remote published: {entry.id} v{entry.version}", fg=typer.colors.GREEN
     )
     for w in warnings:
         typer.secho(f"  Warning: {w}", fg=typer.colors.YELLOW, err=True)
@@ -1191,11 +1220,27 @@ def _make_registry_backend(
 
     if not remote_registry_root:
         return local
-    if remote_registry_root.startswith(("http://", "https://")):
-        remote = RemoteRegistryClient(remote_registry_root)
-    else:
-        remote = FileRemoteRegistry(remote_registry_root)
+    remote = _make_remote_registry(remote_registry_root)
     return AggregatedRegistry(local, [remote])
+
+
+def _make_remote_registry(
+    remote_registry_root: str,
+    *,
+    remote_token: str | None = None,
+    remote_cache: str | None = None,
+) -> Any:
+    from graphsmith.registry import FileRemoteRegistry, RemoteRegistryClient
+
+    token = remote_token or os.getenv("GRAPHSMITH_REMOTE_TOKEN")
+    cache_root = remote_cache or os.getenv("GRAPHSMITH_REMOTE_CACHE")
+    if remote_registry_root.startswith(("http://", "https://")):
+        return RemoteRegistryClient(
+            remote_registry_root,
+            auth_token=token,
+            cache_root=cache_root,
+        )
+    return FileRemoteRegistry(remote_registry_root)
 
 
 def _resolve_inputs(
