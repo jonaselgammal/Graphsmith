@@ -1171,6 +1171,29 @@ def _build_file_transform_write_then_pytest_plan(
     if transform_skill_id is None:
         return None, []
 
+    reusable_workflow = _find_reusable_synthesized_skill(
+        registry,
+        required_inputs={"input_path", "output_path", "cwd"},
+        required_outputs={"stdout"},
+        required_effects={"filesystem_read", "filesystem_write", "shell_exec"},
+        required_tags={"workflow:file_transform_write_pytest", f"transform:{transform}"},
+    )
+    if reusable_workflow is not None:
+        return (
+            _build_single_skill_invoke_plan(
+                goal,
+                reusable_workflow.id,
+                [
+                    IOField(name="input_path", type="string"),
+                    IOField(name="output_path", type="string"),
+                    IOField(name="cwd", type="string"),
+                ],
+                [IOField(name="stdout", type="string")],
+                ["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+            ),
+            [(reusable_workflow.id, reusable_workflow.version, "")],
+        )
+
     available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
     required = {"fs.read_text.v1", "fs.write_text.v1", "dev.run_pytest.v1", transform_skill_id}
     if not required.issubset(available):
@@ -1210,6 +1233,7 @@ def _build_file_transform_write_then_pytest_plan(
         output_dir=output_dir,
         smoke_test=False,
         slug_hint="file_region",
+        extra_tags=["coding", "environment", "filesystem", "region:file_edit", f"transform:{transform}"],
     )
     if file_plan is None:
         return None, []
@@ -1242,6 +1266,7 @@ def _build_file_transform_write_then_pytest_plan(
         output_dir=output_dir,
         smoke_test=False,
         slug_hint="test_region",
+        extra_tags=["coding", "environment", "shell", "pytest", "region:test"],
     )
     if test_plan is None:
         return None, []
@@ -1270,10 +1295,30 @@ def _build_file_transform_write_then_pytest_plan(
             outputs={"stdout": "test_region.stdout"},
         ),
     )
-    return outer, [
+    workflow_plan, workflow_skill_id, workflow_dir = _materialize_subgraph_skill(
+        goal,
+        outer,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="file_transform_write_pytest_workflow",
+        extra_tags=[
+            "coding",
+            "environment",
+            "filesystem",
+            "pytest",
+            "workflow",
+            "workflow:file_transform_write_pytest",
+            f"transform:{transform}",
+        ],
+    )
+    refs = [
         (file_skill_id, "1.0.0", file_dir),
         (test_skill_id, "1.0.0", test_dir),
     ]
+    if workflow_plan is not None:
+        refs.append((workflow_skill_id, "1.0.0", workflow_dir))
+    return outer, refs
 
 
 def _build_environment_fallback_plan(
@@ -1508,6 +1553,38 @@ def _build_single_skill_invoke_plan(
     )
 
 
+def _find_reusable_synthesized_skill(
+    registry: RegistryBackend,
+    *,
+    required_inputs: set[str],
+    required_outputs: set[str],
+    required_effects: set[str] | None = None,
+    required_tags: set[str] | None = None,
+) -> IndexEntry | None:
+    """Find a reusable synthesized skill that matches a structural contract."""
+    if not hasattr(registry, "list_all"):
+        return None
+    required_effects = required_effects or set()
+    required_tags = required_tags or set()
+    matches: list[IndexEntry] = []
+    for entry in registry.list_all():
+        if not entry.id.startswith("synth."):
+            continue
+        if not required_inputs.issubset(set(entry.required_input_names)):
+            continue
+        if not required_outputs.issubset(set(entry.output_names)):
+            continue
+        if not required_effects.issubset(set(entry.effects)):
+            continue
+        if not required_tags.issubset(set(entry.tags)):
+            continue
+        matches.append(entry)
+    if not matches:
+        return None
+    matches.sort(key=lambda entry: (entry.id, entry.version))
+    return matches[0]
+
+
 def _materialize_subgraph_skill(
     goal: str,
     graph: GlueGraph,
@@ -1516,6 +1593,7 @@ def _materialize_subgraph_skill(
     output_dir: str | Path | None = None,
     smoke_test: bool = True,
     slug_hint: str | None = None,
+    extra_tags: list[str] | None = None,
 ) -> tuple[GlueGraph | None, str, str]:
     """Materialize a composed graph as a reusable local skill package."""
     from graphsmith.models.common import ExampleCase
@@ -1550,7 +1628,7 @@ def _materialize_subgraph_skill(
             inputs=graph.inputs,
             outputs=graph.outputs,
             effects=graph.effects,
-            tags=["synthesized", "subgraph", "closed-loop"],
+            tags=sorted(set(["synthesized", "subgraph", "closed-loop", *(extra_tags or [])])),
             authors=["graphsmith"],
         ),
         graph=pkg.graph,

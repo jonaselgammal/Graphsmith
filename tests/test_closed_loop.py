@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from typer.testing import CliRunner
 
+from graphsmith.planner.candidates import retrieve_candidates
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanResult, UnresolvedHole
 from graphsmith.skills.autogen import AutogenError, extract_spec
@@ -307,11 +308,72 @@ class TestClosedLoopOrchestration:
         assert all(skill_id.startswith("synth.") for skill_id in skill_ids)
         assert result.synthesized_skill_id
         synthesized_ids = set(result.synthesized_skill_id.split(","))
-        assert synthesized_ids == set(skill_ids)
+        assert set(skill_ids).issubset(synthesized_ids)
+        workflow_ids = [
+            entry.id for entry in reg.list_all()
+            if "workflow:file_transform_write_pytest" in entry.tags
+        ]
+        assert len(workflow_ids) == 1
+        assert workflow_ids[0] in synthesized_ids
         for skill_id in skill_ids:
             pkg = reg.fetch(skill_id, "1.0.0")
             assert pkg.skill.id == skill_id
             assert pkg.graph.nodes
+
+    def test_multi_region_environment_workflow_becomes_retrievable_and_reusable(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        goal = "Read a file, title case it, write it to a new file, and then run pytest in the project"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first = run_closed_loop(
+                goal,
+                FailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+            assert first.success
+            workflow_entries = [
+                entry for entry in reg.list_all()
+                if "workflow:file_transform_write_pytest" in entry.tags
+            ]
+            assert len(workflow_entries) == 1
+            workflow_id = workflow_entries[0].id
+
+            retrieved = retrieve_candidates(goal, reg, max_candidates=5)
+            assert workflow_id in {entry.id for entry in retrieved}
+
+            second = run_closed_loop(
+                goal,
+                FailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert second.success
+        assert second.stopped_reason == "multi_region_environment_fallback_succeeded"
+        assert second.replan_plan is not None
+        assert len(second.replan_plan.graph.nodes) == 1
+        node = second.replan_plan.graph.nodes[0]
+        assert node.op == "skill.invoke"
+        assert node.config["skill_id"] == workflow_id
 
     def test_environment_fallback_read_normalize_succeeds(self) -> None:
         class FailBackend:
