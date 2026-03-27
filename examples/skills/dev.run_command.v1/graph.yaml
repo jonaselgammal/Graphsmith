@@ -1,0 +1,20 @@
+version: 1
+
+nodes:
+  - id: run
+    op: shell.exec
+    config:
+      allow_roots:
+        - "./"
+      timeout_ms: 10000
+
+edges:
+  - from: input.argv
+    to: run.argv
+  - from: input.cwd
+    to: run.cwd
+
+outputs:
+  stdout: run.stdout
+  stderr: run.stderr
+  exit_code: run.exit_code

@@ -1,0 +1,11 @@
+examples:
+  - name: echo
+    input:
+      argv:
+        - "/bin/echo"
+        - "graphsmith"
+      cwd: "."
+    expected_output:
+      stdout: "graphsmith\n"
+      stderr: ""
+      exit_code: 0

@@ -78,6 +78,24 @@ graphsmith eval-stress-frontier --goals evaluation/stress_frontier_goals --regis
   --base-url https://api.groq.com/openai/v1
 ```
 
+## Coding frontier set (file, command, and test workflows)
+
+`evaluation/coding_frontier_goals/` defines a separate boundary probe for
+Graphsmith as a programming-task substrate.
+
+It focuses on:
+- reading and writing files
+- running local commands
+- running tests
+- simple code-ish edit workflows
+
+Use it to track how far environment-aware graph composition has progressed:
+```bash
+graphsmith eval-frontier --goals evaluation/coding_frontier_goals --registry "$REG" \
+  --backend ir --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
+```
+
 ## Running evaluations via scripts
 
 The easiest way to run evaluations. Pass provider flags as arguments:

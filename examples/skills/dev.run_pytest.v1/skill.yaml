@@ -1,0 +1,25 @@
+id: dev.run_pytest.v1
+name: Run Pytest
+version: 1.0.0
+description: Run pytest in a project directory and capture the result.
+
+inputs:
+  - name: cwd
+    type: string
+    required: true
+
+outputs:
+  - name: stdout
+    type: string
+  - name: stderr
+    type: string
+  - name: exit_code
+    type: integer
+
+effects:
+  - shell_exec
+
+tags:
+  - development
+  - testing
+  - pytest

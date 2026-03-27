@@ -1,0 +1,7 @@
+examples:
+  - name: write_workspace_file
+    input:
+      path: "tmp/output.txt"
+      text: "hello graphsmith"
+    expected_output:
+      path: "tmp/output.txt"

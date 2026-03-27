@@ -1,0 +1,26 @@
+id: fs.write_text.v1
+name: Write Text File
+version: 1.0.0
+description: Write UTF-8 text to a file in the workspace.
+
+inputs:
+  - name: path
+    type: string
+    required: true
+  - name: text
+    type: string
+    required: true
+
+outputs:
+  - name: path
+    type: string
+  - name: written
+    type: integer
+
+effects:
+  - filesystem_write
+
+tags:
+  - filesystem
+  - io
+  - text

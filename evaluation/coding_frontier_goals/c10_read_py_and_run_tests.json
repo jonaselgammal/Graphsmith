@@ -1,0 +1,12 @@
+{
+  "id": "c10",
+  "goal": "Read a Python file, title-case the first line, write it to a new file, and then run pytest in the project",
+  "tier": 4,
+  "tags": ["coding", "filesystem", "testing", "multi-stage"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.title_case.v1", "fs.write_text.v1", "dev.run_pytest.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "cwd"],
+  "required_output_names": ["stdout"],
+  "min_node_count": 4,
+  "notes": "A multi-region coding workflow with both file effects and test execution."
+}

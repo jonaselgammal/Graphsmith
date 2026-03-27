@@ -1,0 +1,12 @@
+{
+  "id": "c05",
+  "goal": "Run a local command, then check whether its output starts with a given prefix",
+  "tier": 2,
+  "tags": ["coding", "shell", "generated"],
+  "expected_success": true,
+  "required_skill_ids": ["dev.run_command.v1", "text.starts_with.v1"],
+  "required_graph_inputs": ["argv", "cwd", "prefix"],
+  "required_output_names": ["result"],
+  "min_node_count": 2,
+  "notes": "Shell plus generated predicate chain."
+}

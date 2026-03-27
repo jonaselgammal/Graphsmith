@@ -1,0 +1,12 @@
+{
+  "id": "c08",
+  "goal": "Run pytest, summarize the output, and write the summary to a report file",
+  "tier": 3,
+  "tags": ["coding", "testing", "filesystem", "llm"],
+  "expected_success": true,
+  "required_skill_ids": ["dev.run_pytest.v1", "text.summarize.v1", "fs.write_text.v1"],
+  "required_graph_inputs": ["cwd", "report_path"],
+  "required_output_names": ["path"],
+  "min_node_count": 3,
+  "notes": "Command, semantic reduction, and file output."
+}

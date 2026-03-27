@@ -1,0 +1,12 @@
+{
+  "id": "c02",
+  "goal": "Read a text file, normalize it, and write the normalized text to another file",
+  "tier": 1,
+  "tags": ["coding", "filesystem", "transform"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.normalize.v1", "fs.write_text.v1"],
+  "required_graph_inputs": ["input_path", "output_path"],
+  "required_output_names": ["path"],
+  "min_node_count": 3,
+  "notes": "Simple read-transform-write workflow."
+}

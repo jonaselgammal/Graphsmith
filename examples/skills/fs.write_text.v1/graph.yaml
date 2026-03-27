@@ -1,0 +1,18 @@
+version: 1
+
+nodes:
+  - id: write
+    op: fs.write_text
+    config:
+      allow_roots:
+        - "./"
+
+edges:
+  - from: input.path
+    to: write.path
+  - from: input.text
+    to: write.text
+
+outputs:
+  path: write.path
+  written: write.written

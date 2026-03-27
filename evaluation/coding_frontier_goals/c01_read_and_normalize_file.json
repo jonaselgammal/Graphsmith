@@ -1,0 +1,12 @@
+{
+  "id": "c01",
+  "goal": "Read a text file, normalize its contents, and return the normalized text",
+  "tier": 1,
+  "tags": ["coding", "filesystem", "normalize"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.normalize.v1"],
+  "required_graph_inputs": ["path"],
+  "required_output_names": ["normalized"],
+  "min_node_count": 2,
+  "notes": "Smallest file-based coding-style task."
+}

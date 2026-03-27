@@ -1,0 +1,15 @@
+version: 1
+
+nodes:
+  - id: read
+    op: fs.read_text
+    config:
+      allow_roots:
+        - "./"
+
+edges:
+  - from: input.path
+    to: read.path
+
+outputs:
+  text: read.text

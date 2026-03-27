@@ -1,0 +1,6 @@
+examples:
+  - name: read_workspace_file
+    input:
+      path: "README.md"
+    expected_output:
+      text: "# placeholder"

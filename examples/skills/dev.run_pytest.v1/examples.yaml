@@ -1,0 +1,6 @@
+examples:
+  - name: run_local_pytest
+    input:
+      cwd: "."
+    expected_output:
+      exit_code: 0

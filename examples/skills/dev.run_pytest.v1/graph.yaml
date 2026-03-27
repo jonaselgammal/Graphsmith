@@ -1,0 +1,21 @@
+version: 1
+
+nodes:
+  - id: run
+    op: shell.exec
+    config:
+      argv:
+        - "pytest"
+        - "-q"
+      allow_roots:
+        - "./"
+      timeout_ms: 20000
+
+edges:
+  - from: input.cwd
+    to: run.cwd
+
+outputs:
+  stdout: run.stdout
+  stderr: run.stderr
+  exit_code: run.exit_code

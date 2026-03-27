@@ -1,0 +1,12 @@
+{
+  "id": "c09",
+  "goal": "For each file in a list of paths, read it and check whether it contains a target phrase",
+  "tier": 3,
+  "tags": ["coding", "filesystem", "loop", "generated"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.contains.v1"],
+  "required_graph_inputs": ["paths", "substring"],
+  "required_output_names": ["result"],
+  "min_node_count": 2,
+  "notes": "Looped file-read plus generated predicate."
+}

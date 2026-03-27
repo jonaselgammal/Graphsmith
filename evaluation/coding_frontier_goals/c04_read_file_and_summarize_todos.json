@@ -1,0 +1,12 @@
+{
+  "id": "c04",
+  "goal": "Read a source file, extract the TODO comments, and summarize them",
+  "tier": 2,
+  "tags": ["coding", "filesystem", "llm"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.summarize.v1"],
+  "required_graph_inputs": ["path"],
+  "required_output_names": ["summary"],
+  "min_node_count": 2,
+  "notes": "Requires file-read plus semantic processing."
+}

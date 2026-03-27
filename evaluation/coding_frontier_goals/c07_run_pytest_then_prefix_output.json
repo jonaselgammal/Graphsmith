@@ -1,0 +1,12 @@
+{
+  "id": "c07",
+  "goal": "Run pytest, and if tests fail prefix each output line with FAIL otherwise prefix each output line with PASS",
+  "tier": 3,
+  "tags": ["coding", "testing", "branch"],
+  "expected_success": true,
+  "required_skill_ids": ["dev.run_pytest.v1", "text.prefix_lines.v1"],
+  "required_graph_inputs": ["cwd"],
+  "required_output_names": ["prefixed"],
+  "min_node_count": 3,
+  "notes": "Branching over command output."
+}

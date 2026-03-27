@@ -1,0 +1,21 @@
+id: fs.read_text.v1
+name: Read Text File
+version: 1.0.0
+description: Read a UTF-8 text file from the workspace.
+
+inputs:
+  - name: path
+    type: string
+    required: true
+
+outputs:
+  - name: text
+    type: string
+
+effects:
+  - filesystem_read
+
+tags:
+  - filesystem
+  - io
+  - text

@@ -195,3 +195,116 @@ class TestFlagshipWorkflow:
         assert result.trace.status == "ok"
         # Normalized text flows through to keyword extraction
         assert "ai agents" in result.outputs["keywords"]
+
+
+class TestEnvironmentSkills:
+    def test_fs_read_text_skill(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "input.txt"
+        target.write_text("hello workspace", encoding="utf-8")
+        pkg = load_skill_package(EXAMPLE_DIR / "fs.read_text.v1")
+        validate_skill_package(pkg)
+        result = run_skill_package(pkg, {"path": "input.txt"})
+        assert result.outputs == {"text": "hello workspace"}
+
+    def test_fs_write_text_skill(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        pkg = load_skill_package(EXAMPLE_DIR / "fs.write_text.v1")
+        validate_skill_package(pkg)
+        result = run_skill_package(
+            pkg,
+            {"path": "out.txt", "text": "written by graphsmith"},
+        )
+        assert result.outputs["path"].endswith("out.txt")
+        assert result.outputs["written"] == len("written by graphsmith")
+        assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "written by graphsmith"
+
+    def test_run_command_skill(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        pkg = load_skill_package(EXAMPLE_DIR / "dev.run_command.v1")
+        validate_skill_package(pkg)
+        result = run_skill_package(
+            pkg,
+            {"argv": ["/bin/echo", "graphsmith"], "cwd": "."},
+        )
+        assert result.outputs["stdout"] == "graphsmith\n"
+        assert result.outputs["stderr"] == ""
+        assert result.outputs["exit_code"] == 0
+
+    def test_run_pytest_skill(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        test_file = tmp_path / "test_sample.py"
+        test_file.write_text(
+            "def test_ok():\n    assert 1 + 1 == 2\n",
+            encoding="utf-8",
+        )
+        pkg = load_skill_package(EXAMPLE_DIR / "dev.run_pytest.v1")
+        validate_skill_package(pkg)
+        result = run_skill_package(pkg, {"cwd": "."})
+        assert result.outputs["exit_code"] == 0
+        assert "1 passed" in result.outputs["stdout"]
+
+
+class TestEnvironmentWorkflow:
+    @pytest.fixture()
+    def reg(self, tmp_path: Path) -> LocalRegistry:
+        r = LocalRegistry(root=tmp_path / "reg")
+        r.publish(EXAMPLE_DIR / "fs.read_text.v1")
+        r.publish(EXAMPLE_DIR / "fs.write_text.v1")
+        r.publish(EXAMPLE_DIR / "text.normalize.v1")
+        return r
+
+    def test_read_normalize_write_workflow(
+        self,
+        reg: LocalRegistry,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "input.txt").write_text("  HELLO   GraphSmith  ", encoding="utf-8")
+
+        glue = GlueGraph(
+            goal="read normalize write",
+            inputs=[
+                IOField(name="input_path", type="string"),
+                IOField(name="output_path", type="string"),
+            ],
+            outputs=[IOField(name="path", type="string")],
+            effects=["filesystem_read", "filesystem_write", "pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="read",
+                        op="skill.invoke",
+                        config={"skill_id": "fs.read_text.v1", "version": "1.0.0"},
+                    ),
+                    GraphNode(
+                        id="normalize",
+                        op="skill.invoke",
+                        config={"skill_id": "text.normalize.v1", "version": "1.0.0"},
+                    ),
+                    GraphNode(
+                        id="write",
+                        op="skill.invoke",
+                        config={"skill_id": "fs.write_text.v1", "version": "1.0.0"},
+                    ),
+                ],
+                edges=[
+                    GraphEdge(from_="input.input_path", to="read.path"),
+                    GraphEdge(from_="read.text", to="normalize.text"),
+                    GraphEdge(from_="input.output_path", to="write.path"),
+                    GraphEdge(from_="normalize.normalized", to="write.text"),
+                ],
+                outputs={"path": "write.path"},
+            ),
+        )
+
+        result = run_glue_graph(
+            glue,
+            {"input_path": "input.txt", "output_path": "output.txt"},
+            registry=reg,
+        )
+        assert result.trace.status == "ok"
+        assert result.outputs["path"].endswith("output.txt")
+        assert (tmp_path / "output.txt").read_text(encoding="utf-8") == "hello graphsmith"

@@ -1,0 +1,28 @@
+id: dev.run_command.v1
+name: Run Command
+version: 1.0.0
+description: Run a bounded local command and capture stdout, stderr, and exit code.
+
+inputs:
+  - name: argv
+    type: array<string>
+    required: true
+  - name: cwd
+    type: string
+    required: true
+
+outputs:
+  - name: stdout
+    type: string
+  - name: stderr
+    type: string
+  - name: exit_code
+    type: integer
+
+effects:
+  - shell_exec
+
+tags:
+  - development
+  - command
+  - shell
