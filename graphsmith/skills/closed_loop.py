@@ -289,7 +289,14 @@ def _goal_matches_read_normalize_write(goal: str) -> bool:
 
 def _goal_matches_run_pytest(goal: str) -> bool:
     goal_lower = goal.lower()
-    return "pytest" in goal_lower and "run" in goal_lower and "summarize" not in goal_lower and "prefix" not in goal_lower
+    return (
+        "pytest" in goal_lower
+        and "run" in goal_lower
+        and "summarize" not in goal_lower
+        and "prefix" not in goal_lower
+        and "read" not in goal_lower
+        and "write" not in goal_lower
+    )
 
 
 def _goal_matches_run_command_starts_with(goal: str) -> bool:
@@ -307,6 +314,26 @@ def _goal_matches_read_replace_write(goal: str) -> bool:
     )
 
 
+def _goal_matches_pytest_prefix_branch(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "pytest" in goal_lower
+        and "if tests fail" in goal_lower
+        and "otherwise" in goal_lower
+        and "prefix each output line" in goal_lower
+    )
+
+
+def _goal_matches_loop_read_contains(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        _goal_has_loop_semantics(goal)
+        and "file" in goal_lower
+        and "contain" in goal_lower
+        and "phrase" in goal_lower
+    )
+
+
 def _goal_supports_environment_fallback(goal: str) -> bool:
     return any((
         _goal_matches_read_normalize(goal),
@@ -314,6 +341,8 @@ def _goal_supports_environment_fallback(goal: str) -> bool:
         _goal_matches_run_pytest(goal),
         _goal_matches_run_command_starts_with(goal),
         _goal_matches_read_replace_write(goal),
+        _goal_matches_pytest_prefix_branch(goal),
+        _goal_matches_loop_read_contains(goal),
     ))
 
 
@@ -364,6 +393,8 @@ def _semantic_fidelity_block_reason(goal: str) -> str:
     if _goal_matches_sentiment_branch_prefix(goal):
         return ""
     if _goal_matches_sentiment_branch_body_prefix(goal):
+        return ""
+    if _goal_matches_loop_read_contains(goal):
         return ""
     if _goal_supports_structured_numeric_fallback(goal):
         return ""
@@ -884,6 +915,56 @@ def _build_run_pytest_plan(goal: str, registry: RegistryBackend) -> GlueGraph | 
     )
 
 
+def _build_run_pytest_prefix_branch_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not {"dev.run_pytest.v1", "text.prefix_lines.v1"}.issubset(available):
+        return None
+    return GlueGraph(
+        goal=goal,
+        inputs=[IOField(name="cwd", type="string")],
+        outputs=[IOField(name="prefixed", type="string")],
+        effects=["shell_exec", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
+                GraphNode(id="zero", op="template.render", config={"template": "0"}),
+                GraphNode(id="is_success", op="text.equals"),
+                GraphNode(id="pass_label", op="template.render", config={"template": "PASS"}),
+                GraphNode(id="fail_label", op="template.render", config={"template": "FAIL"}),
+                GraphNode(
+                    id="prefix_pass",
+                    op="skill.invoke",
+                    config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
+                    when="is_success.result",
+                ),
+                GraphNode(
+                    id="prefix_fail",
+                    op="skill.invoke",
+                    config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
+                    when="!is_success.result",
+                ),
+                GraphNode(id="merge_prefixed", op="fallback.try"),
+            ],
+            edges=[
+                GraphEdge(from_="input.cwd", to="pytest.cwd"),
+                GraphEdge(from_="pytest.exit_code", to="is_success.text"),
+                GraphEdge(from_="zero.rendered", to="is_success.other"),
+                GraphEdge(from_="pytest.stdout", to="prefix_pass.text"),
+                GraphEdge(from_="pass_label.rendered", to="prefix_pass.prefix"),
+                GraphEdge(from_="pytest.stdout", to="prefix_fail.text"),
+                GraphEdge(from_="fail_label.rendered", to="prefix_fail.prefix"),
+                GraphEdge(from_="prefix_pass.prefixed", to="merge_prefixed.primary"),
+                GraphEdge(from_="prefix_fail.prefixed", to="merge_prefixed.fallback"),
+            ],
+            outputs={"prefixed": "merge_prefixed.result"},
+        ),
+    )
+
+
 def _build_run_command_starts_with_plan(
     goal: str,
     registry: RegistryBackend,
@@ -964,17 +1045,74 @@ def _build_read_replace_write_plan(
     )
 
 
+def _build_loop_read_contains_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_spec: SkillSpec,
+) -> GlueGraph | None:
+    if generated_spec.skill_id != "text.contains.v1":
+        return None
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not {"fs.read_text.v1", generated_spec.skill_id}.issubset(available):
+        return None
+
+    ir = PlanningIR(
+        goal=goal,
+        inputs=[
+            IRInput(name="paths", type="array<string>"),
+            IRInput(name="substring", type="string"),
+        ],
+        steps=[],
+        blocks=[
+            IRBlock(
+                name="process_each_file",
+                kind="loop",
+                collection=IRSource(step="input", port="paths"),
+                inputs={
+                    "path": IRSource(binding="item"),
+                    "substring": IRSource(step="input", port="substring"),
+                },
+                steps=[
+                    IRStep(
+                        name="read",
+                        skill_id="fs.read_text.v1",
+                        sources={"path": IRSource(step="input", port="path")},
+                    ),
+                    IRStep(
+                        name="contains",
+                        skill_id=generated_spec.skill_id,
+                        sources={
+                            "text": IRSource(step="read", port="text"),
+                            "substring": IRSource(step="input", port="substring"),
+                        },
+                    ),
+                ],
+                final_outputs={"result": IROutputRef(step="contains", port="result")},
+                max_items=50,
+            )
+        ],
+        final_outputs={"result": IROutputRef(step="process_each_file", port="result")},
+        effects=["filesystem_read", "pure"],
+    )
+    return compile_ir(ir)
+
+
 def _build_environment_fallback_plan(
     goal: str,
     registry: RegistryBackend,
     generated_spec: SkillSpec | None = None,
 ) -> GlueGraph | None:
+    if _goal_matches_pytest_prefix_branch(goal):
+        return _build_run_pytest_prefix_branch_plan(goal, registry)
     if _goal_matches_read_normalize_write(goal):
         return _build_read_normalize_write_plan(goal, registry)
     if _goal_matches_read_normalize(goal):
         return _build_read_normalize_plan(goal, registry)
     if _goal_matches_run_pytest(goal):
         return _build_run_pytest_plan(goal, registry)
+    if generated_spec is not None and _goal_matches_loop_read_contains(goal):
+        return _build_loop_read_contains_plan(goal, registry, generated_spec)
     if generated_spec is not None and _goal_matches_run_command_starts_with(goal):
         return _build_run_command_starts_with_plan(goal, registry, generated_spec)
     if generated_spec is not None and _goal_matches_read_replace_write(goal):
@@ -1426,6 +1564,10 @@ def _environment_workflow_grounding_failure(
         required_skill_ids = {"dev.run_pytest.v1"}
         required_inputs = {"cwd"}
         required_outputs = {"stdout"}
+    elif _goal_matches_pytest_prefix_branch(goal):
+        required_skill_ids = {"dev.run_pytest.v1", "text.prefix_lines.v1", "fallback.try"}
+        required_inputs = {"cwd"}
+        required_outputs = {"prefixed"}
     elif _goal_matches_run_command_starts_with(goal):
         required_skill_ids = {"dev.run_command.v1", "text.starts_with.v1"}
         required_inputs = {"argv", "cwd", "prefix"}
@@ -1434,6 +1576,10 @@ def _environment_workflow_grounding_failure(
         required_skill_ids = {"fs.read_text.v1", "text.replace.v1", "fs.write_text.v1"}
         required_inputs = {"input_path", "output_path", "old", "new"}
         required_outputs = {"path"}
+    elif _goal_matches_loop_read_contains(goal):
+        required_skill_ids = {"parallel.map"}
+        required_inputs = {"paths", "substring"}
+        required_outputs = {"result"}
     else:
         return ""
 
@@ -1493,6 +1639,8 @@ def run_closed_loop(
         exact_spec = _spec_from_template("replace", goal)
     if exact_spec is None and _goal_matches_run_command_starts_with(goal):
         exact_spec = _spec_from_template("starts_with", goal)
+    if exact_spec is None and _goal_matches_loop_read_contains(goal):
+        exact_spec = _spec_from_template("contains", goal)
     if exact_spec is not None and _autogen_conflicts_with_existing_pipeline(goal, exact_spec):
         exact_spec = None
 

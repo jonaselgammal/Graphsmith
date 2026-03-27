@@ -393,6 +393,73 @@ class TestClosedLoopOrchestration:
         skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
         assert {"fs.read_text.v1", "text.replace.v1", "fs.write_text.v1"}.issubset(skill_ids)
 
+    def test_environment_fallback_run_pytest_branch_prefix_succeeds(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Run pytest, and if tests fail prefix each output line with FAIL otherwise prefix each output line with PASS",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.outputs} == {"prefixed"}
+        assert "fallback.try" in [node.op for node in result.replan_plan.graph.nodes]
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert {"dev.run_pytest.v1", "text.prefix_lines.v1"}.issubset(skill_ids)
+
+    def test_environment_fallback_loop_read_contains_generates_contains(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.contains.v1"})
+        result = run_closed_loop(
+            "For each file in a list of paths, read it and check whether it contains a target phrase",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.generated_spec is not None
+        assert result.generated_spec.skill_id == "text.contains.v1"
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert result.replan_plan.graph.nodes[0].op == "parallel.map"
+        assert {field.name for field in result.replan_plan.inputs} == {"paths", "substring"}
+        assert {field.name for field in result.replan_plan.outputs} == {"result"}
+
     def test_exact_skill_grounding_rejects_near_miss_success_and_falls_back(self) -> None:
         class NearMissBackend:
             _candidate_count = 1
