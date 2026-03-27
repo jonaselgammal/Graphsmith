@@ -447,16 +447,21 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert result.stopped_reason == "structured_numeric_fallback_succeeded"
         assert result.replan_plan is not None
+        assert result.synthesized_skill_id.startswith("synth.")
+        assert result.replan_plan.graph.nodes[0].config["skill_id"] == result.synthesized_skill_id
+        assert "divisor" in {field.name for field in result.replan_plan.inputs}
+        pkg = reg.fetch(result.synthesized_skill_id, "1.0.0")
+        assert len(pkg.graph.nodes) >= 4
         skill_ids = [
             node.config["skill_id"]
-            for node in result.replan_plan.graph.nodes
+            for node in pkg.graph.nodes
             if node.op == "skill.invoke"
         ]
         assert "math.median.v1" in skill_ids
         assert "math.divide.v1" in skill_ids
         assert "json.pretty_print.v1" in skill_ids
-        assert "divisor" in {field.name for field in result.replan_plan.inputs}
-        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+        assert any(node.op == "json.pack" for node in pkg.graph.nodes)
+        assert pkg.examples.examples
 
     def test_structured_numeric_fallback_succeeds_for_multi_stat_json_contains(self) -> None:
         class AlwaysFailBackend:
@@ -488,17 +493,20 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert result.stopped_reason == "structured_numeric_fallback_succeeded"
         assert result.replan_plan is not None
+        assert result.synthesized_skill_id.startswith("synth.")
+        assert result.replan_plan.graph.nodes[0].config["skill_id"] == result.synthesized_skill_id
+        assert "substring" in {field.name for field in result.replan_plan.inputs}
+        pkg = reg.fetch(result.synthesized_skill_id, "1.0.0")
         skill_ids = [
             node.config["skill_id"]
-            for node in result.replan_plan.graph.nodes
+            for node in pkg.graph.nodes
             if node.op == "skill.invoke"
         ]
         assert "math.median.v1" in skill_ids
         assert "math.max.v1" in skill_ids
         assert "json.pretty_print.v1" in skill_ids
         assert "text.contains.v1" in skill_ids
-        assert "substring" in {field.name for field in result.replan_plan.inputs}
-        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+        assert any(node.op == "json.pack" for node in pkg.graph.nodes)
 
     def test_structured_numeric_fallback_preempts_existing_pipeline_near_miss(self) -> None:
         class NearMissBackend:
@@ -549,7 +557,9 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert result.stopped_reason == "structured_numeric_fallback_succeeded"
         assert result.replan_plan is not None
-        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+        assert result.synthesized_skill_id.startswith("synth.")
+        pkg = reg.fetch(result.synthesized_skill_id, "1.0.0")
+        assert any(node.op == "json.pack" for node in pkg.graph.nodes)
 
     def test_user_decline_stops_loop(self) -> None:
         class AlwaysFailBackend:
@@ -841,7 +851,9 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert result.stopped_reason == "structured_numeric_fallback_succeeded"
         assert result.replan_plan is not None
-        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+        assert result.synthesized_skill_id.startswith("synth.")
+        pkg = reg.fetch(result.synthesized_skill_id, "1.0.0")
+        assert any(node.op == "json.pack" for node in pkg.graph.nodes)
 
     def test_multi_stage_fallback_stays_off_for_loop_goal(self) -> None:
         class AlwaysFailBackend:
@@ -1130,19 +1142,22 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert result.stopped_reason == "branch_fallback_succeeded"
         assert result.replan_plan is not None
-        ids = [node.id for node in result.replan_plan.graph.nodes]
-        assert "positive_body" in ids
-        assert "negative_body" in ids
-        node_map = {node.id: node for node in result.replan_plan.graph.nodes}
-        assert node_map["positive_body"].config["skill_id"] == "text.summarize.v1"
-        assert node_map["negative_body"].config["skill_id"] == "text.extract_keywords.v1"
-        assert node_map["positive_body"].when == "is_positive.result"
-        assert node_map["negative_body"].when == "!is_positive.result"
+        assert result.synthesized_skill_id.startswith("synth.")
+        assert result.replan_plan.graph.nodes[0].config["skill_id"] == result.synthesized_skill_id
         assert {field.name for field in result.replan_plan.inputs} == {
             "text",
             "positive_prefix",
             "negative_prefix",
         }
+        pkg = reg.fetch(result.synthesized_skill_id, "1.0.0")
+        ids = [node.id for node in pkg.graph.nodes]
+        assert "positive_body" in ids
+        assert "negative_body" in ids
+        node_map = {node.id: node for node in pkg.graph.nodes}
+        assert node_map["positive_body"].config["skill_id"] == "text.summarize.v1"
+        assert node_map["negative_body"].config["skill_id"] == "text.extract_keywords.v1"
+        assert node_map["positive_body"].when == "is_positive.result"
+        assert node_map["negative_body"].when == "!is_positive.result"
 
     def test_normalizes_branch_shaped_initial_success_before_accepting(self) -> None:
         class ApproximateBranchBackend:
@@ -1259,12 +1274,14 @@ class TestClosedLoopOrchestration:
         assert result.success
         assert result.stopped_reason == "branch_fallback_succeeded"
         assert result.replan_plan is not None
+        assert result.synthesized_skill_id.startswith("synth.")
         assert {field.name for field in result.replan_plan.inputs} == {
             "text",
             "positive_prefix",
             "negative_prefix",
         }
-        node_ids = {node.id: node for node in result.replan_plan.graph.nodes}
+        pkg = reg.fetch(result.synthesized_skill_id, "1.0.0")
+        node_ids = {node.id: node for node in pkg.graph.nodes}
         assert node_ids["merge_prefixed"].op == "fallback.try"
         assert node_ids["positive_body"].config["skill_id"] == "text.summarize.v1"
         assert node_ids["negative_body"].config["skill_id"] == "text.extract_keywords.v1"
@@ -1444,6 +1461,18 @@ class TestFormatClosedLoopResult:
         text = format_closed_loop_result(r)
         assert "Failure stage: validation" in text
         assert "generated_skill_validation_failed" in text
+
+    def test_format_includes_synthesized_subgraph(self) -> None:
+        r = ClosedLoopResult(
+            initial_status="failure",
+            synthesized_skill_id="synth.example.v1",
+            synthesis_dir="/tmp/synth",
+            stopped_reason="branch_fallback_succeeded",
+            success=True,
+        )
+        text = format_closed_loop_result(r)
+        assert "Synthesized subgraph: synth.example.v1" in text
+        assert "Synthesized files: /tmp/synth" in text
 
 
 class TestClosedLoopCli:

@@ -3,6 +3,7 @@
 PRIMITIVE_OPS = {
     "template.render",
     "json.parse",
+    "json.pack",
     "select.fields",
     "array.map",
     "array.filter",

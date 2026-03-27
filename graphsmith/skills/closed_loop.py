@@ -4,17 +4,21 @@ Bounded prototype that handles exactly one missing deterministic single-step ski
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+import yaml
 
 from graphsmith.planner.decomposition import decompose_deterministic
 from graphsmith.planner.compiler import compile_ir
 from graphsmith.planner.ir import IRBlock, IRInput, IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.ir_backend import CandidateResult
+from graphsmith.planner.composer import glue_to_skill_package
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
 from graphsmith.planner.policy import (
     derive_goal_constraints,
@@ -172,6 +176,8 @@ class ClosedLoopResult(BaseModel):
     # Skill generation
     generated_spec: SkillSpec | None = None
     generation_dir: str = ""
+    synthesized_skill_id: str = ""
+    synthesis_dir: str = ""
     validation_pass: bool = False
     examples_total: int = 0
     examples_passed: int = 0
@@ -336,7 +342,7 @@ def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
         effects=["pure"],
         graph=GraphBody(
             version=1,
-            nodes=[GraphNode(id="generated", op="skill.invoke", config={"skill_id": spec.skill_id})],
+            nodes=[GraphNode(id="generated", op="skill.invoke", config={"skill_id": spec.skill_id, "version": "1.0.0"})],
             edges=[
                 GraphEdge(from_=f"input.{inp['name']}", to=f"generated.{inp['name']}")
                 for inp in spec.inputs
@@ -404,7 +410,13 @@ def _build_linear_pipeline_plan(
 
     for idx, pkg in enumerate(packages):
         node_id = f"step_{idx + 1}"
-        nodes.append(GraphNode(id=node_id, op="skill.invoke", config={"skill_id": pkg.skill.id}))
+        nodes.append(
+            GraphNode(
+                id=node_id,
+                op="skill.invoke",
+                config={"skill_id": pkg.skill.id, "version": pkg.skill.version},
+            )
+        )
         required_inputs = [field for field in pkg.skill.inputs if field.required]
         if idx == 0:
             for field in required_inputs:
@@ -671,7 +683,13 @@ def _build_structured_numeric_fallback_plan(
         if spec is None:
             return None
         node_id = key
-        nodes.append(GraphNode(id=node_id, op="skill.invoke", config={"skill_id": spec.skill_id}))
+        nodes.append(
+            GraphNode(
+                id=node_id,
+                op="skill.invoke",
+                config={"skill_id": spec.skill_id, "version": "1.0.0"},
+            )
+        )
         edges.append(GraphEdge(from_="input.values", to=f"{node_id}.values"))
         scalar_ports[key] = f"{node_id}.result"
 
@@ -680,7 +698,9 @@ def _build_structured_numeric_fallback_plan(
         divide_spec = spec_by_key.get("divide")
         if divide_spec is None or len(numeric_keys) != 1:
             return None
-        nodes.append(GraphNode(id="divide", op="skill.invoke", config={"skill_id": divide_spec.skill_id}))
+        nodes.append(
+            GraphNode(id="divide", op="skill.invoke", config={"skill_id": divide_spec.skill_id, "version": "1.0.0"})
+        )
         edges.append(GraphEdge(from_=scalar_ports[numeric_keys[0]], to="divide.a"))
         edges.append(GraphEdge(from_="input.divisor", to="divide.b"))
         inputs.append(IOField(name="divisor", type="string"))
@@ -694,7 +714,9 @@ def _build_structured_numeric_fallback_plan(
     for field_name, source in packed_fields.items():
         edges.append(GraphEdge(from_=source, to=f"pack.{field_name}"))
 
-    nodes.append(GraphNode(id="pretty", op="skill.invoke", config={"skill_id": "json.pretty_print.v1"}))
+    nodes.append(
+        GraphNode(id="pretty", op="skill.invoke", config={"skill_id": "json.pretty_print.v1", "version": "1.0.0"})
+    )
     edges.append(GraphEdge(from_="pack.raw_json", to="pretty.raw_json"))
 
     outputs = [IOField(name="formatted", type="string")]
@@ -704,7 +726,9 @@ def _build_structured_numeric_fallback_plan(
         contains_spec = spec_by_key.get("contains")
         if contains_spec is None:
             return None
-        nodes.append(GraphNode(id="contains", op="skill.invoke", config={"skill_id": contains_spec.skill_id}))
+        nodes.append(
+            GraphNode(id="contains", op="skill.invoke", config={"skill_id": contains_spec.skill_id, "version": "1.0.0"})
+        )
         edges.append(GraphEdge(from_="pretty.formatted", to="contains.text"))
         edges.append(GraphEdge(from_="input.substring", to="contains.substring"))
         inputs.append(IOField(name="substring", type="string"))
@@ -771,7 +795,7 @@ def _build_sentiment_branch_formatter_plan(
 
     effects = {"llm_inference", "pure"}
     nodes: list[GraphNode] = [
-        GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
+        GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1", "version": "1.0.0"}),
         GraphNode(id="positive_label", op="template.render", config={"template": "positive"}),
         GraphNode(id="is_positive", op="text.equals"),
     ]
@@ -792,7 +816,7 @@ def _build_sentiment_branch_formatter_plan(
             GraphNode(
                 id="positive_body",
                 op="skill.invoke",
-                config={"skill_id": positive_body_skill_id},
+                config={"skill_id": positive_body_skill_id, "version": "1.0.0"},
                 when="is_positive.result",
             )
         )
@@ -807,7 +831,7 @@ def _build_sentiment_branch_formatter_plan(
             GraphNode(
                 id="negative_body",
                 op="skill.invoke",
-                config={"skill_id": negative_body_skill_id},
+                config={"skill_id": negative_body_skill_id, "version": "1.0.0"},
                 when="!is_positive.result",
             )
         )
@@ -819,13 +843,13 @@ def _build_sentiment_branch_formatter_plan(
             GraphNode(
                 id="prefix_positive",
                 op="skill.invoke",
-                config={"skill_id": "text.prefix_lines.v1"},
+                config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
                 when="is_positive.result",
             ),
             GraphNode(
                 id="prefix_negative",
                 op="skill.invoke",
-                config={"skill_id": "text.prefix_lines.v1"},
+                config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
                 when="!is_positive.result",
             ),
             GraphNode(id="merge_prefixed", op="fallback.try"),
@@ -867,6 +891,167 @@ def _build_sentiment_branch_body_fallback_plan(goal: str, registry: RegistryBack
         registry,
         positive_body_skill_id="text.summarize.v1",
         negative_body_skill_id="text.extract_keywords.v1",
+    )
+
+
+def _sample_input_value(field_name: str, field_type: Any) -> Any:
+    """Build a deterministic smoke-test value for a graph input."""
+    type_str = field_type if isinstance(field_type, str) else ""
+    if field_name == "raw_json":
+        return '{"value": "alpha"}'
+    if field_name == "substring":
+        return "alpha"
+    if field_name == "prefix":
+        return "# "
+    if field_name == "positive_prefix":
+        return "+ "
+    if field_name == "negative_prefix":
+        return "- "
+    if field_name == "divisor":
+        return "2"
+    if field_name == "values":
+        return "1\n2\n3\n4"
+    if field_name in {"text", "code_lines"}:
+        return "Alpha\nBeta"
+    if field_name == "texts":
+        return ["Alpha text", "Beta text"]
+    if field_name == "json_objects":
+        return ['{"value":"alpha"}', '{"value":"beta"}']
+
+    if type_str.startswith("array<number>"):
+        return [1, 2, 3]
+    if type_str.startswith("array<string>"):
+        return ["alpha", "beta"]
+    if type_str == "number":
+        return 1.5
+    if type_str == "integer":
+        return 1
+    if type_str == "boolean":
+        return True
+    if type_str == "object":
+        return {"value": "alpha"}
+    return "sample"
+
+
+def _build_single_skill_invoke_plan(
+    goal: str,
+    skill_id: str,
+    inputs: list[Any],
+    outputs: list[Any],
+    effects: list[str],
+) -> GlueGraph:
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    return GlueGraph(
+        goal=goal,
+        inputs=inputs,
+        outputs=outputs,
+        effects=effects,
+        graph=GraphBody(
+            version=1,
+            nodes=[GraphNode(id="synthesized", op="skill.invoke", config={"skill_id": skill_id, "version": "1.0.0"})],
+            edges=[
+                GraphEdge(from_=f"input.{field.name}", to=f"synthesized.{field.name}")
+                for field in inputs
+            ],
+            outputs={field.name: f"synthesized.{field.name}" for field in outputs},
+        ),
+    )
+
+
+def _synthesize_subgraph_skill(
+    goal: str,
+    graph: GlueGraph,
+    registry: RegistryBackend,
+    *,
+    output_dir: str | Path | None = None,
+) -> tuple[GlueGraph | None, str, str]:
+    """Materialize a composed graph as a reusable skill package and invoke plan."""
+    from graphsmith.models.common import ExampleCase
+    from graphsmith.models.package import ExamplesFile, SkillPackage
+    from graphsmith.models.skill import SkillMetadata
+    from graphsmith.ops.llm_provider import EchoLLMProvider
+    from graphsmith.runtime import run_skill_package
+    from graphsmith.validator import validate_skill_package
+
+    graph_dump = json.dumps(graph.model_dump(mode="json"), sort_keys=True)
+    digest = hashlib.sha1(graph_dump.encode("utf-8")).hexdigest()[:8]
+    slug = "".join(c if c.isalnum() else "_" for c in goal.lower()).strip("_")[:24] or "workflow"
+    skill_id = f"synth.{slug}_{digest}.v1"
+
+    existing = _find_registry_entry(registry, skill_id)
+    if existing is not None:
+        return (
+            _build_single_skill_invoke_plan(goal, skill_id, graph.inputs, graph.outputs, graph.effects),
+            skill_id,
+            "",
+        )
+
+    pkg = glue_to_skill_package(graph)
+    pkg = SkillPackage(
+        root_path="(synthesized)",
+        skill=SkillMetadata(
+            id=skill_id,
+            name=f"Synthesized {skill_id.split('.', 1)[1].rsplit('.v', 1)[0].replace('_', ' ').title()}",
+            version="1.0.0",
+            description=f"Synthesized subgraph skill for goal: {goal}",
+            inputs=graph.inputs,
+            outputs=graph.outputs,
+            effects=graph.effects,
+            tags=["synthesized", "subgraph", "closed-loop"],
+            authors=["graphsmith"],
+        ),
+        graph=pkg.graph,
+        examples=ExamplesFile(),
+    )
+    validate_skill_package(pkg)
+
+    sample_inputs = {
+        field.name: _sample_input_value(field.name, field.type)
+        for field in pkg.skill.inputs
+    }
+    smoke = run_skill_package(
+        pkg,
+        sample_inputs,
+        registry=registry,
+        llm_provider=EchoLLMProvider(prefix=""),
+    )
+    pkg = pkg.model_copy(
+        update={
+            "examples": ExamplesFile(
+                examples=[
+                    ExampleCase(
+                        name="smoke",
+                        input=sample_inputs,
+                        expected_output=smoke.outputs,
+                    )
+                ]
+            )
+        }
+    )
+
+    synth_root = Path(output_dir) if output_dir else Path(tempfile.mkdtemp()) / "synthesized_skills"
+    synth_root.mkdir(parents=True, exist_ok=True)
+    skill_dir = synth_root / skill_id
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "skill.yaml").write_text(
+        yaml.safe_dump(pkg.skill.model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+    (skill_dir / "graph.yaml").write_text(
+        yaml.safe_dump(pkg.graph.model_dump(mode="json", by_alias=True), sort_keys=False),
+        encoding="utf-8",
+    )
+    (skill_dir / "examples.yaml").write_text(
+        yaml.safe_dump(pkg.examples.model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+
+    registry.publish(str(skill_dir))
+    return (
+        _build_single_skill_invoke_plan(goal, skill_id, graph.inputs, graph.outputs, graph.effects),
+        skill_id,
+        str(skill_dir),
     )
 
 
@@ -1034,6 +1219,17 @@ def run_closed_loop(
     if branch_fallback is None:
         branch_fallback = _build_sentiment_branch_fallback_plan(goal, registry)
     if branch_fallback is not None:
+        if _goal_matches_sentiment_branch_body_prefix(goal):
+            synthesized_plan, synthesized_skill_id, synthesis_dir = _synthesize_subgraph_skill(
+                goal,
+                branch_fallback,
+                registry,
+                output_dir=output_dir,
+            )
+            if synthesized_plan is not None:
+                branch_fallback = synthesized_plan
+                result.synthesized_skill_id = synthesized_skill_id
+                result.synthesis_dir = synthesis_dir
         result.replan_status = "success"
         result.replan_plan = branch_fallback
         block_reason = _semantic_fidelity_block_reason(goal)
@@ -1096,6 +1292,16 @@ def run_closed_loop(
             else:
                 fallback_graph = _build_structured_numeric_fallback_plan(goal, registry, generated_specs)
                 if fallback_graph is not None:
+                    synthesized_plan, synthesized_skill_id, synthesis_dir = _synthesize_subgraph_skill(
+                        goal,
+                        fallback_graph,
+                        registry,
+                        output_dir=output_dir,
+                    )
+                    if synthesized_plan is not None:
+                        fallback_graph = synthesized_plan
+                        result.synthesized_skill_id = synthesized_skill_id
+                        result.synthesis_dir = synthesis_dir
                     result.generated_spec = generated_specs[0] if generated_specs else None
                     result.replan_status = "success"
                     result.replan_plan = fallback_graph
@@ -1387,6 +1593,10 @@ def format_closed_loop_result(result: ClosedLoopResult) -> str:
             lines.append(f"  Failure stage: {result.generation_failure_stage}")
         if result.generation_dir:
             lines.append(f"  Files: {result.generation_dir}")
+    if result.synthesized_skill_id:
+        lines.append(f"  Synthesized subgraph: {result.synthesized_skill_id}")
+        if result.synthesis_dir:
+            lines.append(f"  Synthesized files: {result.synthesis_dir}")
 
     # Replan
     if result.replan_status:
