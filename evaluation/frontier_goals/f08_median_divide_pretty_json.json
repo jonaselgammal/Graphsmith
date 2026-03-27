@@ -1,0 +1,11 @@
+{
+  "id": "f08",
+  "goal": "Compute the median of these numbers, divide it by another number, and pretty print the result as JSON",
+  "tier": 3,
+  "tags": ["math", "stats", "json", "generated"],
+  "expected_success": true,
+  "required_skill_ids": ["math.median.v1", "math.divide.v1", "json.pretty_print.v1"],
+  "required_graph_inputs": ["divisor"],
+  "min_node_count": 3,
+  "notes": "Mixed stats-plus-formatting probe with one existing generated math skill and one missing math step."
+}

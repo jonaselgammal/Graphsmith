@@ -1,0 +1,10 @@
+{
+  "id": "f05",
+  "goal": "Normalize this text, sort the lines, remove duplicates, and join the lines back together",
+  "tier": 2,
+  "tags": ["pipeline", "text", "deterministic", "programming_adjacent"],
+  "expected_success": true,
+  "required_skill_ids": ["text.normalize.v1", "text.sort_lines.v1", "text.remove_duplicates.v1", "text.join_lines.v1"],
+  "min_node_count": 4,
+  "notes": "Near-frontier deterministic existing-skill pipeline."
+}

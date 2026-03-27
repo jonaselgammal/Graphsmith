@@ -1,0 +1,11 @@
+{
+  "id": "f10",
+  "goal": "Classify the sentiment of this text, if it is positive summarize it, otherwise extract keywords, and prefix each resulting line with a label",
+  "tier": 3,
+  "tags": ["branch", "llm", "text", "formatting"],
+  "expected_success": true,
+  "required_skill_ids": ["text.classify_sentiment.v1", "text.summarize.v1", "text.extract_keywords.v1", "text.prefix_lines.v1"],
+  "required_graph_inputs": ["positive_prefix", "negative_prefix"],
+  "min_node_count": 5,
+  "notes": "Branch-plus-LLM region with different branch bodies and shared formatting."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "f04",
+  "goal": "Classify the sentiment of this text and if it is positive prefix each line with one label, otherwise prefix each line with a different label",
+  "tier": 2,
+  "tags": ["branch", "sentiment", "text", "formatting"],
+  "expected_success": true,
+  "required_skill_ids": ["text.classify_sentiment.v1", "text.prefix_lines.v1", "fallback.try"],
+  "required_graph_inputs": ["positive_prefix", "negative_prefix"],
+  "required_output_names": ["prefixed"],
+  "min_node_count": 5,
+  "notes": "Near-frontier structural branch fallback with sentiment-conditioned formatting."
+}
