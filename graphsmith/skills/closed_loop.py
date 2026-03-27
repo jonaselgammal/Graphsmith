@@ -267,6 +267,56 @@ def _goal_supports_structured_numeric_fallback(goal: str) -> bool:
     return "pretty_print" in decomp.content_transforms
 
 
+def _goal_matches_read_normalize(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "read" in goal_lower
+        and "file" in goal_lower
+        and "normalize" in goal_lower
+        and "write" not in goal_lower
+    )
+
+
+def _goal_matches_read_normalize_write(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "read" in goal_lower
+        and "file" in goal_lower
+        and "normalize" in goal_lower
+        and "write" in goal_lower
+    )
+
+
+def _goal_matches_run_pytest(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return "pytest" in goal_lower and "run" in goal_lower and "summarize" not in goal_lower and "prefix" not in goal_lower
+
+
+def _goal_matches_run_command_starts_with(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return "command" in goal_lower and "starts with" in goal_lower
+
+
+def _goal_matches_read_replace_write(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "read" in goal_lower
+        and "file" in goal_lower
+        and "replace" in goal_lower
+        and "write" in goal_lower
+    )
+
+
+def _goal_supports_environment_fallback(goal: str) -> bool:
+    return any((
+        _goal_matches_read_normalize(goal),
+        _goal_matches_read_normalize_write(goal),
+        _goal_matches_run_pytest(goal),
+        _goal_matches_run_command_starts_with(goal),
+        _goal_matches_read_replace_write(goal),
+    ))
+
+
 def _goal_matches_sentiment_branch_body_prefix(goal: str) -> bool:
     goal_lower = goal.lower()
     return (
@@ -325,7 +375,7 @@ def _semantic_fidelity_block_reason(goal: str) -> str:
         return "semantic_fidelity_blocked"
     if _goal_has_loop_semantics(goal) and match_template_keys(goal) and not _goal_supports_loop_generated_fallback(goal):
         return "semantic_fidelity_blocked"
-    if _goal_has_filesystem_boundary(goal):
+    if _goal_has_filesystem_boundary(goal) and not _goal_supports_environment_fallback(goal):
         return "semantic_fidelity_blocked"
     return ""
 
@@ -749,6 +799,189 @@ def _build_structured_numeric_fallback_plan(
     )
 
 
+def _build_read_normalize_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    required = {"fs.read_text.v1", "text.normalize.v1"}
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not required.issubset(available):
+        return None
+    return GlueGraph(
+        goal=goal,
+        inputs=[IOField(name="path", type="string")],
+        outputs=[IOField(name="normalized", type="string")],
+        effects=["filesystem_read", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="read", op="skill.invoke", config={"skill_id": "fs.read_text.v1", "version": "1.0.0"}),
+                GraphNode(id="normalize", op="skill.invoke", config={"skill_id": "text.normalize.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.path", to="read.path"),
+                GraphEdge(from_="read.text", to="normalize.text"),
+            ],
+            outputs={"normalized": "normalize.normalized"},
+        ),
+    )
+
+
+def _build_read_normalize_write_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    required = {"fs.read_text.v1", "text.normalize.v1", "fs.write_text.v1"}
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not required.issubset(available):
+        return None
+    return GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="input_path", type="string"),
+            IOField(name="output_path", type="string"),
+        ],
+        outputs=[IOField(name="path", type="string")],
+        effects=["filesystem_read", "filesystem_write", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="read", op="skill.invoke", config={"skill_id": "fs.read_text.v1", "version": "1.0.0"}),
+                GraphNode(id="normalize", op="skill.invoke", config={"skill_id": "text.normalize.v1", "version": "1.0.0"}),
+                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.input_path", to="read.path"),
+                GraphEdge(from_="read.text", to="normalize.text"),
+                GraphEdge(from_="input.output_path", to="write.path"),
+                GraphEdge(from_="normalize.normalized", to="write.text"),
+            ],
+            outputs={"path": "write.path"},
+        ),
+    )
+
+
+def _build_run_pytest_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if "dev.run_pytest.v1" not in available:
+        return None
+    return GlueGraph(
+        goal=goal,
+        inputs=[IOField(name="cwd", type="string")],
+        outputs=[IOField(name="stdout", type="string")],
+        effects=["shell_exec"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
+            ],
+            edges=[GraphEdge(from_="input.cwd", to="pytest.cwd")],
+            outputs={"stdout": "pytest.stdout"},
+        ),
+    )
+
+
+def _build_run_command_starts_with_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_spec: SkillSpec,
+) -> GlueGraph | None:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not {"dev.run_command.v1", generated_spec.skill_id}.issubset(available) or generated_spec.skill_id != "text.starts_with.v1":
+        return None
+    return GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="argv", type="array<string>"),
+            IOField(name="cwd", type="string"),
+            IOField(name="prefix", type="string"),
+        ],
+        outputs=[IOField(name="result", type="string")],
+        effects=["shell_exec", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="run", op="skill.invoke", config={"skill_id": "dev.run_command.v1", "version": "1.0.0"}),
+                GraphNode(id="starts_with", op="skill.invoke", config={"skill_id": generated_spec.skill_id, "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.argv", to="run.argv"),
+                GraphEdge(from_="input.cwd", to="run.cwd"),
+                GraphEdge(from_="run.stdout", to="starts_with.text"),
+                GraphEdge(from_="input.prefix", to="starts_with.prefix"),
+            ],
+            outputs={"result": "starts_with.result"},
+        ),
+    )
+
+
+def _build_read_replace_write_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_spec: SkillSpec,
+) -> GlueGraph | None:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not {"fs.read_text.v1", "fs.write_text.v1", generated_spec.skill_id}.issubset(available):
+        return None
+    if generated_spec.skill_id != "text.replace.v1":
+        return None
+    return GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="input_path", type="string"),
+            IOField(name="output_path", type="string"),
+            IOField(name="old", type="string"),
+            IOField(name="new", type="string"),
+        ],
+        outputs=[IOField(name="path", type="string")],
+        effects=["filesystem_read", "filesystem_write", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="read", op="skill.invoke", config={"skill_id": "fs.read_text.v1", "version": "1.0.0"}),
+                GraphNode(id="replace", op="skill.invoke", config={"skill_id": generated_spec.skill_id, "version": "1.0.0"}),
+                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.input_path", to="read.path"),
+                GraphEdge(from_="read.text", to="replace.text"),
+                GraphEdge(from_="input.old", to="replace.old"),
+                GraphEdge(from_="input.new", to="replace.new"),
+                GraphEdge(from_="input.output_path", to="write.path"),
+                GraphEdge(from_="replace.replaced", to="write.text"),
+            ],
+            outputs={"path": "write.path"},
+        ),
+    )
+
+
+def _build_environment_fallback_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_spec: SkillSpec | None = None,
+) -> GlueGraph | None:
+    if _goal_matches_read_normalize_write(goal):
+        return _build_read_normalize_write_plan(goal, registry)
+    if _goal_matches_read_normalize(goal):
+        return _build_read_normalize_plan(goal, registry)
+    if _goal_matches_run_pytest(goal):
+        return _build_run_pytest_plan(goal, registry)
+    if generated_spec is not None and _goal_matches_run_command_starts_with(goal):
+        return _build_run_command_starts_with_plan(goal, registry, generated_spec)
+    if generated_spec is not None and _goal_matches_read_replace_write(goal):
+        return _build_read_replace_write_plan(goal, registry, generated_spec)
+    return None
+
+
 def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
     """Build a bounded branch fallback for sentiment-conditioned prefix formatting."""
     return _build_sentiment_branch_formatter_plan(goal, registry)
@@ -1071,6 +1304,31 @@ def _graph_skill_ids(graph: GlueGraph) -> list[str]:
     return skill_ids
 
 
+def _maybe_synthesize_fallback_graph(
+    goal: str,
+    graph: GlueGraph,
+    result: ClosedLoopResult,
+    registry: RegistryBackend,
+    *,
+    output_dir: str | Path | None = None,
+) -> GlueGraph:
+    if len(graph.graph.nodes) <= 1:
+        return graph
+    if any(effect in {"filesystem_read", "filesystem_write", "shell_exec"} for effect in graph.effects):
+        return graph
+    synthesized_plan, synthesized_skill_id, synthesis_dir = _synthesize_subgraph_skill(
+        goal,
+        graph,
+        registry,
+        output_dir=output_dir,
+    )
+    if synthesized_plan is None:
+        return graph
+    result.synthesized_skill_id = synthesized_skill_id
+    result.synthesis_dir = synthesis_dir
+    return synthesized_plan
+
+
 def _exact_skill_grounding_failure(
     graph: GlueGraph | None,
     spec: SkillSpec | None,
@@ -1144,6 +1402,59 @@ def _branch_region_grounding_failure(
     return ""
 
 
+def _environment_workflow_grounding_failure(
+    graph: GlueGraph | None,
+    goal: str,
+) -> str:
+    """Detect environment workflow plans that miss required skills, inputs, or outputs."""
+    if graph is None:
+        return ""
+
+    required_skill_ids: set[str] = set()
+    required_inputs: set[str] = set()
+    required_outputs: set[str] = set()
+
+    if _goal_matches_read_normalize_write(goal):
+        required_skill_ids = {"fs.read_text.v1", "text.normalize.v1", "fs.write_text.v1"}
+        required_inputs = {"input_path", "output_path"}
+        required_outputs = {"path"}
+    elif _goal_matches_read_normalize(goal):
+        required_skill_ids = {"fs.read_text.v1", "text.normalize.v1"}
+        required_inputs = {"path"}
+        required_outputs = {"normalized"}
+    elif _goal_matches_run_pytest(goal):
+        required_skill_ids = {"dev.run_pytest.v1"}
+        required_inputs = {"cwd"}
+        required_outputs = {"stdout"}
+    elif _goal_matches_run_command_starts_with(goal):
+        required_skill_ids = {"dev.run_command.v1", "text.starts_with.v1"}
+        required_inputs = {"argv", "cwd", "prefix"}
+        required_outputs = {"result"}
+    elif _goal_matches_read_replace_write(goal):
+        required_skill_ids = {"fs.read_text.v1", "text.replace.v1", "fs.write_text.v1"}
+        required_inputs = {"input_path", "output_path", "old", "new"}
+        required_outputs = {"path"}
+    else:
+        return ""
+
+    graph_inputs = {field.name for field in graph.inputs}
+    missing_inputs = sorted(required_inputs - graph_inputs)
+    if missing_inputs:
+        return "missing_environment_inputs:" + ",".join(missing_inputs)
+
+    graph_outputs = {field.name for field in graph.outputs}
+    missing_outputs = sorted(required_outputs - graph_outputs)
+    if missing_outputs:
+        return "missing_environment_outputs:" + ",".join(missing_outputs)
+
+    skill_ids = set(_graph_skill_ids(graph))
+    missing_skills = sorted(required_skill_ids - skill_ids)
+    if missing_skills:
+        return "missing_environment_skills:" + ",".join(missing_skills)
+
+    return ""
+
+
 # ── Orchestrator ─────────────────────────────────────────────────
 
 
@@ -1178,6 +1489,10 @@ def run_closed_loop(
         exact_spec = extract_spec(goal)
     except AutogenError:
         exact_spec = None
+    if exact_spec is None and _goal_matches_read_replace_write(goal):
+        exact_spec = _spec_from_template("replace", goal)
+    if exact_spec is None and _goal_matches_run_command_starts_with(goal):
+        exact_spec = _spec_from_template("starts_with", goal)
     if exact_spec is not None and _autogen_conflicts_with_existing_pipeline(goal, exact_spec):
         exact_spec = None
 
@@ -1194,6 +1509,7 @@ def run_closed_loop(
     plan_grounding_failure = _exact_skill_grounding_failure(plan_result.graph, exact_spec)
     existing_grounding_failure = _existing_skill_grounding_failure(plan_result.graph, goal)
     branch_grounding_failure = _branch_region_grounding_failure(plan_result.graph, goal)
+    environment_grounding_failure = _environment_workflow_grounding_failure(plan_result.graph, goal)
 
     result.initial_status = plan_result.status
     result.initial_plan = plan_result.graph
@@ -1210,8 +1526,29 @@ def run_closed_loop(
         and not plan_grounding_failure
         and not existing_grounding_failure
         and not branch_grounding_failure
+        and not environment_grounding_failure
     ):
         result.stopped_reason = "initial_plan_succeeded"
+        result.success = True
+        return result
+
+    environment_fallback = _build_environment_fallback_plan(goal, registry, exact_spec)
+    if environment_fallback is not None:
+        environment_fallback = _maybe_synthesize_fallback_graph(
+            goal,
+            environment_fallback,
+            result,
+            registry,
+            output_dir=output_dir,
+        )
+        result.replan_status = "success"
+        result.replan_plan = environment_fallback
+        block_reason = _semantic_fidelity_block_reason(goal)
+        if block_reason:
+            result.stopped_reason = block_reason
+            result.success = False
+            return result
+        result.stopped_reason = "environment_fallback_succeeded"
         result.success = True
         return result
 
@@ -1365,18 +1702,28 @@ def run_closed_loop(
             available_ids.update(entry.id for entry in registry.list_all())
         except Exception:
             pass
-    diagnosis = detect_missing_skill(
-        goal,
-        plan_result if not plan_grounding_failure and not existing_grounding_failure else PlanResult(status="failure", graph=plan_result.graph),
-        backend.last_candidates,
-        available_skill_ids=available_ids,
-    )
+    if exact_spec is not None and _goal_supports_environment_fallback(goal) and exact_spec.skill_id not in available_ids:
+        diagnosis = MissingSkillDiagnosis(
+            is_missing=True,
+            reason=f"Environment workflow requires missing generated skill {exact_spec.skill_id}",
+            capability_hint=goal,
+            exact_skill_id=exact_spec.skill_id,
+        )
+    else:
+        diagnosis = detect_missing_skill(
+            goal,
+            plan_result if not plan_grounding_failure and not existing_grounding_failure else PlanResult(status="failure", graph=plan_result.graph),
+            backend.last_candidates,
+            available_skill_ids=available_ids,
+        )
     if plan_grounding_failure:
         diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {plan_grounding_failure}"
     if existing_grounding_failure:
         diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {existing_grounding_failure}"
     if branch_grounding_failure:
         diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {branch_grounding_failure}"
+    if environment_grounding_failure:
+        diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {environment_grounding_failure}"
     result.detected_missing = diagnosis.is_missing
     result.diagnosis_reason = diagnosis.reason
 
@@ -1407,6 +1754,26 @@ def run_closed_loop(
             result.stopped_reason = "existing_skill_replan_succeeded"
             result.success = True
             return result
+        if exact_spec is not None:
+            environment_fallback = _build_environment_fallback_plan(goal, registry, exact_spec)
+            if environment_fallback is not None:
+                environment_fallback = _maybe_synthesize_fallback_graph(
+                    goal,
+                    environment_fallback,
+                    result,
+                    registry,
+                    output_dir=output_dir,
+                )
+                result.replan_status = "success"
+                result.replan_plan = environment_fallback
+                block_reason = _semantic_fidelity_block_reason(goal)
+                if block_reason:
+                    result.stopped_reason = block_reason
+                    result.success = False
+                    return result
+                result.stopped_reason = "environment_fallback_succeeded"
+                result.success = True
+                return result
         if exact_spec is not None and not _is_multi_stage_goal(goal):
             result.replan_status = "success"
             result.replan_plan = _build_single_skill_plan(goal, exact_spec)
@@ -1451,12 +1818,15 @@ def run_closed_loop(
         return result
 
     # ── Step 3: Generate candidate skill ──────────────────────────
-    try:
-        spec = extract_spec(diagnosis.capability_hint)
-    except AutogenError as exc:
-        result.stopped_reason = "spec_extraction_failed"
-        result.generation_errors.append(str(exc))
-        return result
+    if exact_spec is not None and diagnosis.exact_skill_id == exact_spec.skill_id:
+        spec = exact_spec
+    else:
+        try:
+            spec = extract_spec(diagnosis.capability_hint)
+        except AutogenError as exc:
+            result.stopped_reason = "spec_extraction_failed"
+            result.generation_errors.append(str(exc))
+            return result
 
     result.generated_spec = spec
 
@@ -1532,6 +1902,25 @@ def run_closed_loop(
                 result.success = False
                 return result
             result.stopped_reason = "replan_succeeded"
+            return result
+        environment_fallback = _build_environment_fallback_plan(goal, registry, spec)
+        if environment_fallback is not None:
+            environment_fallback = _maybe_synthesize_fallback_graph(
+                goal,
+                environment_fallback,
+                result,
+                registry,
+                output_dir=output_dir,
+            )
+            result.replan_status = "success"
+            result.replan_plan = environment_fallback
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
+            result.stopped_reason = "environment_fallback_succeeded"
+            result.success = True
             return result
         if not _is_multi_stage_goal(goal):
             result.replan_status = "success"

@@ -263,6 +263,136 @@ class TestClosedLoopOrchestration:
         assert not result.success
         assert result.stopped_reason == "semantic_fidelity_blocked"
 
+    def test_environment_fallback_read_normalize_succeeds(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Read a text file, normalize its contents, and return the normalized text",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.synthesized_skill_id == ""
+        assert result.replan_plan is not None
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert "fs.read_text.v1" in skill_ids
+        assert "text.normalize.v1" in skill_ids
+
+    def test_environment_fallback_read_normalize_write_succeeds(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Read a text file, normalize it, and write the normalized text to another file",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.synthesized_skill_id == ""
+        assert result.replan_plan is not None
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert {"fs.read_text.v1", "text.normalize.v1", "fs.write_text.v1"}.issubset(skill_ids)
+
+    def test_environment_fallback_run_pytest_succeeds(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Run pytest in this project folder and return the test output",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert result.synthesized_skill_id == ""
+        assert result.replan_plan.graph.nodes[0].config["skill_id"] == "dev.run_pytest.v1"
+
+    def test_environment_fallback_read_replace_write_generates_replace(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.replace.v1"})
+        result = run_closed_loop(
+            "Read a file, replace one substring with another, and write the edited text back to a new file",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.generated_spec is not None
+        assert result.generated_spec.skill_id == "text.replace.v1"
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.synthesized_skill_id == ""
+        assert result.replan_plan is not None
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert {"fs.read_text.v1", "text.replace.v1", "fs.write_text.v1"}.issubset(skill_ids)
+
     def test_exact_skill_grounding_rejects_near_miss_success_and_falls_back(self) -> None:
         class NearMissBackend:
             _candidate_count = 1
