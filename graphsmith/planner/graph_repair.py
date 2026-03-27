@@ -50,6 +50,96 @@ _PRIMITIVE_OUTPUT_PORTS = {
 }
 
 
+def _goal_matches_sentiment_prefix_branch(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "sentiment" in goal_lower
+        and "positive" in goal_lower
+        and "otherwise" in goal_lower
+        and ("prefix each line" in goal_lower or "prefix the lines" in goal_lower)
+    )
+
+
+def _graph_skill_ids(glue: GlueGraph) -> list[str]:
+    skill_ids: list[str] = []
+    for node in glue.graph.nodes:
+        if node.op == "skill.invoke":
+            skill_id = node.config.get("skill_id")
+            if isinstance(skill_id, str):
+                skill_ids.append(skill_id)
+        else:
+            skill_ids.append(node.op)
+    return skill_ids
+
+
+def _canonicalize_sentiment_prefix_branch(glue: GlueGraph) -> tuple[GlueGraph, list[str]]:
+    """Rewrite branch-shaped sentiment prefix plans into the canonical guarded form."""
+    skill_ids = _graph_skill_ids(glue)
+    if not _goal_matches_sentiment_prefix_branch(glue.goal):
+        return glue, []
+    if "text.classify_sentiment.v1" not in skill_ids:
+        return glue, []
+    if "text.prefix_lines.v1" not in skill_ids:
+        return glue, []
+
+    input_names = {field.name for field in glue.inputs}
+    if (
+        "positive_prefix" in input_names
+        and "negative_prefix" in input_names
+        and "fallback.try" in skill_ids
+    ):
+        return glue, []
+
+    text_input = next((field for field in glue.inputs if field.name == "text"), None)
+    text_type = text_input.type if text_input is not None else "string"
+    repaired = GlueGraph(
+        goal=glue.goal,
+        inputs=[
+            IOField(name="text", type=text_type),
+            IOField(name="positive_prefix", type="string"),
+            IOField(name="negative_prefix", type="string"),
+        ],
+        outputs=[IOField(name="prefixed", type="string")],
+        effects=sorted(set([*glue.effects, "llm_inference", "pure"])),
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
+                GraphNode(id="positive_label", op="template.render", config={"template": "positive"}),
+                GraphNode(id="is_positive", op="text.equals"),
+                GraphNode(
+                    id="prefix_positive",
+                    op="skill.invoke",
+                    config={"skill_id": "text.prefix_lines.v1"},
+                    when="is_positive.result",
+                ),
+                GraphNode(
+                    id="prefix_negative",
+                    op="skill.invoke",
+                    config={"skill_id": "text.prefix_lines.v1"},
+                    when="!is_positive.result",
+                ),
+                GraphNode(id="merge_prefixed", op="fallback.try"),
+            ],
+            edges=[
+                GraphEdge(from_="input.text", to="classify.text"),
+                GraphEdge(from_="classify.sentiment", to="is_positive.text"),
+                GraphEdge(from_="positive_label.rendered", to="is_positive.other"),
+                GraphEdge(from_="input.text", to="prefix_positive.text"),
+                GraphEdge(from_="input.positive_prefix", to="prefix_positive.prefix"),
+                GraphEdge(from_="input.text", to="prefix_negative.text"),
+                GraphEdge(from_="input.negative_prefix", to="prefix_negative.prefix"),
+                GraphEdge(from_="prefix_positive.prefixed", to="merge_prefixed.primary"),
+                GraphEdge(from_="prefix_negative.prefixed", to="merge_prefixed.fallback"),
+            ],
+            outputs={"prefixed": "merge_prefixed.result"},
+        ),
+    )
+    return repaired, [
+        "graph: canonicalize sentiment prefix branch into guarded branches plus merge"
+    ]
+
+
 def normalize_glue_graph_contracts(
     glue: GlueGraph,
     *,
@@ -58,6 +148,9 @@ def normalize_glue_graph_contracts(
     """Normalize common legacy graph contracts before validation/execution."""
     repaired = glue
     actions: list[str] = []
+
+    repaired, branch_actions = _canonicalize_sentiment_prefix_branch(repaired)
+    actions.extend(branch_actions)
 
     for node in list(repaired.graph.nodes):
         if node.op in {"array.map", "parallel.map"}:

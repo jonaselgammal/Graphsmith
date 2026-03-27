@@ -359,6 +359,44 @@ class TestRunGlueGraph:
             "graph:normalize_all: enable aggregated outputs from nested skill output mapping",
         ]
 
+    def test_normalizes_sentiment_prefix_branch_shape(self) -> None:
+        glue = GlueGraph(
+            goal="Classify the sentiment of this text and if it is positive prefix each line with one label, otherwise prefix each line with a different label",
+            inputs=[IOField(name="text", type="string")],
+            outputs=[IOField(name="prefixed", type="string")],
+            effects=["llm_inference"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
+                    GraphNode(id="branch", op="branch.if"),
+                    GraphNode(id="prefix_a", op="skill.invoke", config={"skill_id": "text.prefix_lines.v1"}),
+                    GraphNode(id="prefix_b", op="skill.invoke", config={"skill_id": "text.prefix_lines.v1"}),
+                ],
+                edges=[
+                    {"from": "input.text", "to": "classify.text"},
+                    {"from": "classify.sentiment", "to": "branch.condition"},
+                ],
+                outputs={"prefixed": "prefix_a.prefixed"},
+            ),
+        )
+
+        repaired, actions = normalize_glue_graph_contracts(glue)
+
+        assert actions == [
+            "graph: canonicalize sentiment prefix branch into guarded branches plus merge"
+        ]
+        assert {field.name for field in repaired.inputs} == {
+            "text",
+            "positive_prefix",
+            "negative_prefix",
+        }
+        node_ids = {node.id: node for node in repaired.graph.nodes}
+        assert node_ids["merge_prefixed"].op == "fallback.try"
+        assert node_ids["prefix_positive"].when == "is_positive.result"
+        assert node_ids["prefix_negative"].when == "!is_positive.result"
+        assert repaired.graph.outputs["prefixed"] == "merge_prefixed.result"
+
     def test_aligns_parallel_map_skill_output_from_registry_contract(
         self,
         tmp_path: Path,

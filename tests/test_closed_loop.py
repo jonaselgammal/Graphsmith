@@ -963,6 +963,199 @@ class TestClosedLoopOrchestration:
         assert node_map["prefix_positive"].when == "is_positive.result"
         assert node_map["prefix_negative"].when == "!is_positive.result"
 
+    def test_normalizes_branch_shaped_initial_success_before_accepting(self) -> None:
+        class ApproximateBranchBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+                glue = GlueGraph(
+                    goal=request.goal,
+                    inputs=[IOField(name="text", type="string")],
+                    outputs=[IOField(name="prefixed", type="string")],
+                    effects=["llm_inference"],
+                    graph=GraphBody(
+                        version=1,
+                        nodes=[
+                            GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
+                            GraphNode(id="branch", op="branch.if"),
+                            GraphNode(id="prefix_a", op="skill.invoke", config={"skill_id": "text.prefix_lines.v1"}),
+                            GraphNode(id="prefix_b", op="skill.invoke", config={"skill_id": "text.prefix_lines.v1"}),
+                        ],
+                        edges=[
+                            GraphEdge(from_="input.text", to="classify.text"),
+                            GraphEdge(from_="classify.sentiment", to="branch.condition"),
+                        ],
+                        outputs={"prefixed": "prefix_a.prefixed"},
+                    ),
+                )
+                return PlanResult(status="success", graph=glue)
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Classify the sentiment of this text and if it is positive prefix each line with one label, otherwise prefix each line with a different label",
+            ApproximateBranchBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "initial_plan_succeeded"
+        assert result.initial_plan is not None
+        assert {field.name for field in result.initial_plan.inputs} == {
+            "text",
+            "positive_prefix",
+            "negative_prefix",
+        }
+        node_ids = {node.id: node for node in result.initial_plan.graph.nodes}
+        assert node_ids["merge_prefixed"].op == "fallback.try"
+
+    def test_existing_skill_grounding_rejects_join_near_miss_and_falls_back(self) -> None:
+        class JoinNearMissBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+                return PlanResult(
+                    status="success",
+                    graph=GlueGraph(
+                        goal=request.goal,
+                        inputs=[IOField(name="text", type="string")],
+                        outputs=[IOField(name="joined", type="string")],
+                        effects=["pure"],
+                        graph=GraphBody(
+                            version=1,
+                            nodes=[
+                                GraphNode(id="normalize", op="skill.invoke", config={"skill_id": "text.normalize.v1"}),
+                                GraphNode(id="sort", op="skill.invoke", config={"skill_id": "text.sort_lines.v1"}),
+                                GraphNode(id="dedupe", op="skill.invoke", config={"skill_id": "text.remove_duplicates.v1"}),
+                                GraphNode(id="join", op="skill.invoke", config={"skill_id": "text.join.v1"}),
+                            ],
+                            edges=[
+                                GraphEdge(from_="input.text", to="normalize.text"),
+                                GraphEdge(from_="normalize.normalized", to="sort.text"),
+                                GraphEdge(from_="sort.sorted", to="dedupe.text"),
+                                GraphEdge(from_="dedupe.deduplicated", to="join.text"),
+                            ],
+                            outputs={"joined": "join.joined"},
+                        ),
+                    ),
+                )
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Normalize this text, sort the lines, remove duplicates, and join the lines back together",
+            JoinNearMissBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "existing_pipeline_fallback_succeeded"
+        assert result.replan_plan is not None
+        skill_ids = [node.config["skill_id"] for node in result.replan_plan.graph.nodes]
+        assert skill_ids == [
+            "text.normalize.v1",
+            "text.sort_lines.v1",
+            "text.remove_duplicates.v1",
+            "text.join_lines.v1",
+        ]
+
+    def test_loop_fallback_succeeds_for_contains_body(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "For each text, normalize it, summarize it, and check whether the summary contains a phrase",
+            AlwaysFailBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "loop_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert result.replan_plan.graph.nodes[0].op == "parallel.map"
+        assert result.replan_plan.inputs[0].name == "texts"
+        assert {field.name for field in result.replan_plan.inputs} == {"texts", "substring"}
+
+    def test_two_generated_linear_fallback_succeeds(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.uppercase.v1", "text.starts_with.v1"})
+        result = run_closed_loop(
+            "Parse this JSON, extract the value field, convert it to uppercase, and check whether it starts with a prefix",
+            AlwaysFailBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "two_generated_fallback_succeeded"
+        assert result.replan_plan is not None
+        skill_ids = [node.config["skill_id"] for node in result.replan_plan.graph.nodes]
+        assert skill_ids == [
+            "json.extract_field.v1",
+            "text.uppercase.v1",
+            "text.starts_with.v1",
+        ]
+
 
 # ── Format output ────────────────────────────────────────────────
 

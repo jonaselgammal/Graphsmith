@@ -12,6 +12,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from graphsmith.planner.decomposition import decompose_deterministic
+from graphsmith.planner.compiler import compile_ir
+from graphsmith.planner.ir import IRBlock, IRInput, IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
 from graphsmith.planner.policy import (
@@ -24,6 +26,7 @@ from graphsmith.registry.base import RegistryBackend
 from graphsmith.skills.autogen import (
     AutogenError,
     SkillSpec,
+    _spec_from_template,
     extract_spec,
     format_result,
     generate_skill_files,
@@ -215,6 +218,27 @@ def _goal_has_filesystem_boundary(goal: str) -> bool:
     return any(token in goal_lower for token in (" file ", " disk", "filesystem", " path", "from disk", "read a "))
 
 
+def _goal_supports_loop_generated_fallback(goal: str) -> bool:
+    if not _goal_has_loop_semantics(goal):
+        return False
+    keys = match_template_keys(goal)
+    if keys != ["contains"]:
+        return False
+    transforms = decompose_deterministic(goal).content_transforms
+    return transforms in (["normalize", "summarize"], ["extract_field", "pretty_print"])
+
+
+def _goal_supports_two_generated_linear_fallback(goal: str) -> bool:
+    if _goal_has_loop_semantics(goal):
+        return False
+    if _goal_matches_sentiment_branch_prefix(goal):
+        return False
+    if _goal_has_filesystem_boundary(goal):
+        return False
+    keys = set(match_template_keys(goal))
+    return keys == {"uppercase", "starts_with"}
+
+
 def _goal_matches_sentiment_branch_prefix(goal: str) -> bool:
     goal_lower = goal.lower()
     return (
@@ -225,6 +249,26 @@ def _goal_matches_sentiment_branch_prefix(goal: str) -> bool:
     )
 
 
+def _expected_existing_skill_ids(goal: str) -> list[str]:
+    """Expected existing skills from deterministic decomposition."""
+    if _goal_has_loop_semantics(goal):
+        return []
+    decomp = decompose_deterministic(goal)
+    skill_ids: list[str] = []
+    for transform in decomp.content_transforms:
+        skill_id = _TRANSFORM_SKILL_IDS.get(transform)
+        if skill_id is not None:
+            skill_ids.append(skill_id)
+    if decomp.presentation == "list" and "text.join_lines.v1" not in skill_ids:
+        skill_ids.append("text.join_lines.v1")
+    return skill_ids
+
+
+def _autogen_conflicts_with_existing_pipeline(goal: str, spec: SkillSpec) -> bool:
+    expected = _expected_existing_skill_ids(goal)
+    return spec.skill_id == "text.join.v1" and "text.join_lines.v1" in expected
+
+
 def _semantic_fidelity_block_reason(goal: str) -> str:
     """Return a bounded reason when the goal exceeds current closed-loop fidelity."""
     if _goal_matches_sentiment_branch_prefix(goal):
@@ -233,9 +277,9 @@ def _semantic_fidelity_block_reason(goal: str) -> str:
         return "semantic_fidelity_blocked"
     if requires_published_only(goal) and match_template_keys(goal):
         return "semantic_fidelity_blocked"
-    if _goal_needs_multiple_generated_skills(goal):
+    if _goal_needs_multiple_generated_skills(goal) and not _goal_supports_two_generated_linear_fallback(goal):
         return "semantic_fidelity_blocked"
-    if _goal_has_loop_semantics(goal) and match_template_keys(goal):
+    if _goal_has_loop_semantics(goal) and match_template_keys(goal) and not _goal_supports_loop_generated_fallback(goal):
         return "semantic_fidelity_blocked"
     if _goal_has_filesystem_boundary(goal):
         return "semantic_fidelity_blocked"
@@ -435,6 +479,116 @@ def _build_existing_skill_fallback_plan(
     return _build_linear_pipeline_plan(goal, registry, skill_ids)
 
 
+def _build_loop_fallback_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_spec: SkillSpec,
+) -> GlueGraph | None:
+    """Build a bounded loop-region fallback using the existing IR loop lowering."""
+    if generated_spec.skill_id != "text.contains.v1":
+        return None
+    if not _goal_supports_loop_generated_fallback(goal):
+        return None
+
+    decomp = decompose_deterministic(goal)
+    transforms = decomp.content_transforms
+    steps: list[IRStep] = []
+    previous_step: str | None = None
+    previous_port: str | None = None
+
+    item_collection_name = "texts"
+    item_collection_type = "array<string>"
+    loop_input_name = "text"
+    if transforms == ["extract_field", "pretty_print"]:
+        item_collection_name = "json_objects"
+        item_collection_type = "array<string>"
+        loop_input_name = "raw_json"
+
+    for transform in transforms:
+        skill_id = _TRANSFORM_SKILL_IDS.get(transform)
+        if skill_id is None:
+            return None
+        if previous_step is None:
+            sources = {loop_input_name: IRSource(step="input", port=loop_input_name)}
+        else:
+            next_input = "text"
+            if transform == "pretty_print":
+                next_input = "raw_json"
+            sources = {next_input: IRSource(step=previous_step, port=previous_port)}
+        step_name = transform
+        steps.append(IRStep(name=step_name, skill_id=skill_id, sources=sources))
+        previous_step = step_name
+        previous_port = {
+            "normalize": "normalized",
+            "summarize": "summary",
+            "extract_field": "value",
+            "pretty_print": "formatted",
+        }[transform]
+
+    if previous_step is None or previous_port is None:
+        return None
+
+    steps.append(
+        IRStep(
+            name="contains",
+            skill_id=generated_spec.skill_id,
+            sources={
+                "text": IRSource(step=previous_step, port=previous_port),
+                "substring": IRSource(step="input", port="substring"),
+            },
+        )
+    )
+
+    ir = PlanningIR(
+        goal=goal,
+        inputs=[
+            IRInput(name=item_collection_name, type=item_collection_type),
+            IRInput(name="substring", type="string"),
+        ],
+        steps=[],
+        blocks=[
+            IRBlock(
+                name="process_each",
+                kind="loop",
+                collection=IRSource(step="input", port=item_collection_name),
+                inputs={
+                    loop_input_name: IRSource(binding="item"),
+                    "substring": IRSource(step="input", port="substring"),
+                },
+                steps=steps,
+                final_outputs={"result": IROutputRef(step="contains", port="result")},
+                max_items=50,
+            )
+        ],
+        final_outputs={"result": IROutputRef(step="process_each", port="result")},
+        effects=["pure", "llm_inference"],
+    )
+    return compile_ir(ir)
+
+
+def _build_two_generated_linear_fallback_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_specs: list[SkillSpec],
+) -> GlueGraph | None:
+    if not _goal_supports_two_generated_linear_fallback(goal):
+        return None
+    spec_by_key = {spec.template_key: spec for spec in generated_specs}
+    if {"uppercase", "starts_with"} - set(spec_by_key):
+        return None
+
+    decomp = decompose_deterministic(goal)
+    skill_ids: list[str] = []
+    for transform in decomp.content_transforms:
+        skill_id = _TRANSFORM_SKILL_IDS.get(transform)
+        if skill_id is None:
+            return None
+        skill_ids.append(skill_id)
+    skill_ids.append(spec_by_key["uppercase"].skill_id)
+    skill_ids.append(spec_by_key["starts_with"].skill_id)
+    return _build_linear_pipeline_plan(goal, registry, skill_ids)
+
+
 def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
     """Build a bounded branch fallback for sentiment-conditioned prefix formatting."""
     from graphsmith.models.common import IOField
@@ -538,6 +692,23 @@ def _exact_skill_grounding_failure(
     return ""
 
 
+def _existing_skill_grounding_failure(
+    graph: GlueGraph | None,
+    goal: str,
+) -> str:
+    """Detect when a deterministic existing-skill chain picked the wrong existing capability."""
+    if graph is None:
+        return ""
+    expected = _expected_existing_skill_ids(goal)
+    if len(expected) < 2:
+        return ""
+    skill_ids = set(_graph_skill_ids(graph))
+    missing = [skill_id for skill_id in expected if skill_id not in skill_ids]
+    if missing:
+        return "missing_existing_skills:" + ",".join(missing)
+    return ""
+
+
 # ── Orchestrator ─────────────────────────────────────────────────
 
 
@@ -561,6 +732,7 @@ def run_closed_loop(
         confirm_fn: Callable(str) → bool for interactive confirmation
     """
     from graphsmith.planner.candidates import retrieve_candidates
+    from graphsmith.planner.graph_repair import normalize_glue_graph_contracts
 
     result = ClosedLoopResult()
     generated_registered = False
@@ -571,6 +743,8 @@ def run_closed_loop(
         exact_spec = extract_spec(goal)
     except AutogenError:
         exact_spec = None
+    if exact_spec is not None and _autogen_conflicts_with_existing_pipeline(goal, exact_spec):
+        exact_spec = None
 
     cands = retrieve_candidates(goal, registry)
     cands = filter_candidates_by_goal_policy(cands, goal)
@@ -579,7 +753,11 @@ def run_closed_loop(
         cands = filter_candidates_by_goal_policy(cands, goal)
     request = PlanRequest(goal=goal, candidates=cands, constraints=derive_goal_constraints(goal))
     plan_result = backend.compose(request)
+    if plan_result.graph is not None:
+        normalized_graph, _ = normalize_glue_graph_contracts(plan_result.graph, registry=registry)
+        plan_result = plan_result.model_copy(update={"graph": normalized_graph})
     plan_grounding_failure = _exact_skill_grounding_failure(plan_result.graph, exact_spec)
+    existing_grounding_failure = _existing_skill_grounding_failure(plan_result.graph, goal)
 
     result.initial_status = plan_result.status
     result.initial_plan = plan_result.graph
@@ -594,6 +772,7 @@ def run_closed_loop(
         plan_result.status == "success"
         and plan_result.graph is not None
         and not plan_grounding_failure
+        and not existing_grounding_failure
     ):
         result.stopped_reason = "initial_plan_succeeded"
         result.success = True
@@ -612,6 +791,74 @@ def run_closed_loop(
         result.success = True
         return result
 
+    if existing_grounding_failure:
+        existing_fallback = _build_existing_skill_fallback_plan(goal, registry)
+        if existing_fallback is not None:
+            result.replan_status = "success"
+            result.replan_plan = existing_fallback
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
+            result.stopped_reason = "existing_pipeline_fallback_succeeded"
+            result.success = True
+            return result
+
+    if exact_spec is not None:
+        loop_fallback = _build_loop_fallback_plan(goal, registry, exact_spec)
+        if loop_fallback is not None:
+            result.replan_status = "success"
+            result.replan_plan = loop_fallback
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
+            result.stopped_reason = "loop_fallback_succeeded"
+            result.success = True
+            return result
+
+    if _goal_supports_two_generated_linear_fallback(goal):
+        generated_specs = [
+            _spec_from_template("uppercase", goal),
+            _spec_from_template("starts_with", goal),
+        ]
+        generated_dirs: list[Path] = []
+        registered_specs: list[SkillSpec] = []
+        try:
+            gen_dir = Path(output_dir) if output_dir else Path(tempfile.mkdtemp()) / "generated_skills"
+            gen_dir.mkdir(parents=True, exist_ok=True)
+            for spec in generated_specs:
+                skill_dir = generate_skill_files(spec, gen_dir)
+                generated_dirs.append(skill_dir)
+                val_result = validate_and_test(spec, skill_dir)
+                if not (
+                    val_result["validation"] == "PASS"
+                    and val_result["examples_passed"] == val_result["examples_total"]
+                ):
+                    break
+                register_generated_op(spec)
+                registered_specs.append(spec)
+                registry.publish(str(skill_dir))
+            else:
+                fallback_graph = _build_two_generated_linear_fallback_plan(goal, registry, generated_specs)
+                if fallback_graph is not None:
+                    result.generated_spec = generated_specs[0]
+                    result.replan_status = "success"
+                    result.replan_plan = fallback_graph
+                    block_reason = _semantic_fidelity_block_reason(goal)
+                    if block_reason:
+                        result.stopped_reason = block_reason
+                        result.success = False
+                        return result
+                    result.stopped_reason = "two_generated_fallback_succeeded"
+                    result.success = True
+                    return result
+        finally:
+            for spec in reversed(registered_specs):
+                unregister_generated_op(spec)
+
     # ── Step 2: Detect missing skill ──────────────────────────────
     diagnosis = detect_missing_skill(goal, plan_result, backend.last_candidates)
     available_ids = {f"{entry.id}" for entry in cands}
@@ -622,12 +869,14 @@ def run_closed_loop(
             pass
     diagnosis = detect_missing_skill(
         goal,
-        plan_result if not plan_grounding_failure else PlanResult(status="failure", graph=plan_result.graph),
+        plan_result if not plan_grounding_failure and not existing_grounding_failure else PlanResult(status="failure", graph=plan_result.graph),
         backend.last_candidates,
         available_skill_ids=available_ids,
     )
     if plan_grounding_failure:
         diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {plan_grounding_failure}"
+    if existing_grounding_failure:
+        diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {existing_grounding_failure}"
     result.detected_missing = diagnosis.is_missing
     result.diagnosis_reason = diagnosis.reason
 
