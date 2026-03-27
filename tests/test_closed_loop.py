@@ -179,6 +179,168 @@ class TestClosedLoopOrchestration:
         assert result.stopped_reason == "replan_succeeded"
         assert result.success
 
+    def test_semantic_fidelity_blocks_multi_generated_initial_success(self) -> None:
+        class SuccessBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+                glue = GlueGraph(
+                    goal=request.goal,
+                    inputs=[IOField(name="text", type="string"), IOField(name="prefix", type="string")],
+                    outputs=[IOField(name="result", type="boolean")],
+                    effects=["pure"],
+                    graph=GraphBody(
+                        version=1,
+                        nodes=[GraphNode(id="step", op="skill.invoke", config={"skill_id": "text.contains.v1"})],
+                        edges=[GraphEdge(from_="input.text", to="step.text")],
+                        outputs={"result": "step.result"},
+                    ),
+                )
+                return PlanResult(status="success", graph=glue)
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Summarize this text, convert the summary to uppercase, and check whether it contains a phrase",
+            SuccessBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert not result.success
+        assert result.stopped_reason == "semantic_fidelity_blocked"
+
+    def test_semantic_fidelity_blocks_filesystem_boundary_success(self) -> None:
+        class SuccessBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+                glue = GlueGraph(
+                    goal=request.goal,
+                    inputs=[IOField(name="path", type="string")],
+                    outputs=[IOField(name="result", type="string")],
+                    effects=["filesystem_read"],
+                    graph=GraphBody(
+                        version=1,
+                        nodes=[GraphNode(id="step", op="skill.invoke", config={"skill_id": "json.extract_field.v1"})],
+                        edges=[GraphEdge(from_="input.path", to="step.raw_json")],
+                        outputs={"result": "step.value"},
+                    ),
+                )
+                return PlanResult(status="success", graph=glue)
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Read a JSON file from disk, extract the value field, and replace one substring with another",
+            SuccessBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert not result.success
+        assert result.stopped_reason == "semantic_fidelity_blocked"
+
+    def test_semantic_fidelity_blocks_published_only_generation(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 3
+            _use_decomposition = True
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                self._last_candidates = []
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Using only already published skills, normalize this text and check whether it starts with a prefix",
+            AlwaysFailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert not result.success
+        assert result.stopped_reason == "semantic_fidelity_blocked"
+
+    def test_semantic_fidelity_blocks_trusted_published_only(self) -> None:
+        class SuccessBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+                glue = GlueGraph(
+                    goal=request.goal,
+                    inputs=[IOField(name="raw_json", type="string"), IOField(name="phrase", type="string")],
+                    outputs=[IOField(name="result", type="string")],
+                    effects=["pure"],
+                    graph=GraphBody(
+                        version=1,
+                        nodes=[
+                            GraphNode(id="extract", op="skill.invoke", config={"skill_id": "json.extract_field.v1"}),
+                            GraphNode(id="contains", op="skill.invoke", config={"skill_id": "text.contains.v1"}),
+                        ],
+                        edges=[
+                            GraphEdge(from_="input.raw_json", to="extract.raw_json"),
+                            GraphEdge(from_="extract.value", to="contains.text"),
+                            GraphEdge(from_="input.phrase", to="contains.phrase"),
+                        ],
+                        outputs={"result": "contains.result"},
+                    ),
+                )
+                return PlanResult(status="success", graph=glue)
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Using only trusted published skills, parse this JSON, extract the value field, and check whether it contains a phrase",
+            SuccessBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert not result.success
+        assert result.stopped_reason == "semantic_fidelity_blocked"
+
     def test_user_decline_stops_loop(self) -> None:
         class AlwaysFailBackend:
             _candidate_count = 3

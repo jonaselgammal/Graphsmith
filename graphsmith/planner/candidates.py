@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from graphsmith.registry.base import RegistryBackend
 from graphsmith.registry.index import IndexEntry
+from graphsmith.planner.policy import filter_candidates_by_goal_policy
 
 _DEFAULT_MAX = 8
 
@@ -87,13 +88,17 @@ def retrieve_candidates_with_diagnostics(
 ) -> tuple[RetrievalDiagnostics, list[IndexEntry]]:
     """Retrieve candidates and return diagnostics alongside."""
     if mode == "broad":
-        return _retrieve_broad(goal, registry, max_candidates=max(max_candidates, 15))
+        diag, entries = _retrieve_broad(goal, registry, max_candidates=max(max_candidates, 15))
     elif mode == "ranked_broad":
-        return _retrieve_ranked(goal, registry, max_candidates=12, use_stems=False, mode_name="ranked_broad")
+        diag, entries = _retrieve_ranked(goal, registry, max_candidates=12, use_stems=False, mode_name="ranked_broad")
     elif mode == "ranked_recall":
-        return _retrieve_ranked(goal, registry, max_candidates=10, use_stems=True, mode_name="ranked_recall")
+        diag, entries = _retrieve_ranked(goal, registry, max_candidates=10, use_stems=True, mode_name="ranked_recall")
     else:
-        return _retrieve_ranked(goal, registry, max_candidates=max_candidates, use_stems=False, mode_name="ranked")
+        diag, entries = _retrieve_ranked(goal, registry, max_candidates=max_candidates, use_stems=False, mode_name="ranked")
+    filtered = filter_candidates_by_goal_policy(entries, goal)
+    diag.candidates = [e.id for e in filtered]
+    diag.candidate_count = len(filtered)
+    return diag, filtered
 
 
 def _retrieve_ranked(

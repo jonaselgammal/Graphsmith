@@ -128,6 +128,10 @@ explicit. Common stop reasons are:
 - Bounded fallbacks are now stricter about semantic overclaiming:
   loop-shaped goals and goals that clearly need multiple generated skills no
   longer get marked as success just because a smaller executable graph exists.
+- Closed-loop now derives explicit policy constraints from the goal for
+  `published-only` and `trusted published only` requests, passes them into the
+  planner prompt, filters retrieval when provenance metadata is available, and
+  refuses to claim success by generating a new skill when the goal forbids it.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of

@@ -19,6 +19,7 @@ from graphsmith.planner.models import (
     PlanResult,
     UnresolvedHole,
 )
+from graphsmith.planner.policy import derive_goal_constraints
 from graphsmith.registry.base import RegistryBackend
 from graphsmith.validator import validate_skill_package
 
@@ -47,7 +48,7 @@ def compose_plan(
     request = PlanRequest(
         goal=goal,
         candidates=candidates,
-        constraints=constraints or [],
+        constraints=[*derive_goal_constraints(goal), *(constraints or [])],
         desired_outputs=desired_outputs or [],
     )
 

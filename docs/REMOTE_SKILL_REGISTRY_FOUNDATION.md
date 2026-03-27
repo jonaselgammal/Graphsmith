@@ -91,6 +91,15 @@ These fields are the first step toward planner-visible trust and reuse
 decisions. Right now they are mainly surfaced through CLI search/show and
 available to retrieval/planning code.
 
+The planner now also has a first narrow policy layer on top of this metadata:
+
+- goals that explicitly say `published-only` filter candidate lists to already
+  published entries
+- goals that explicitly say `trusted published skills` filter candidate lists
+  to entries with `trust_score >= 0.7`
+- closed-loop generation refuses to treat a generated skill as a valid success
+  path when either of those goal-level policies is present
+
 ## CLI support
 
 Commands that plan, search, inspect, or evaluate can now take
@@ -120,7 +129,7 @@ Missing pieces:
 - auth and write permissions
 - signatures or stronger provenance verification
 - remote caching policy
-- ranking/trust-aware retrieval
+- richer ranking/trust-aware retrieval beyond explicit goal policies
 - version resolution beyond exact `(id, version)`
 - moderation / abuse controls
 

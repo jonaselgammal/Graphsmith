@@ -14,6 +14,12 @@ from pydantic import BaseModel, Field
 from graphsmith.planner.decomposition import decompose_deterministic
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
+from graphsmith.planner.policy import (
+    derive_goal_constraints,
+    filter_candidates_by_goal_policy,
+    requires_published_only,
+    requires_trusted_published_only,
+)
 from graphsmith.registry.base import RegistryBackend
 from graphsmith.skills.autogen import (
     AutogenError,
@@ -203,6 +209,10 @@ def _goal_has_filesystem_boundary(goal: str) -> bool:
 
 def _semantic_fidelity_block_reason(goal: str) -> str:
     """Return a bounded reason when the goal exceeds current closed-loop fidelity."""
+    if requires_trusted_published_only(goal):
+        return "semantic_fidelity_blocked"
+    if requires_published_only(goal) and match_template_keys(goal):
+        return "semantic_fidelity_blocked"
     if _goal_needs_multiple_generated_skills(goal):
         return "semantic_fidelity_blocked"
     if _goal_has_loop_semantics(goal) and match_template_keys(goal):
@@ -409,9 +419,11 @@ def run_closed_loop(
         exact_spec = None
 
     cands = retrieve_candidates(goal, registry)
+    cands = filter_candidates_by_goal_policy(cands, goal)
     if exact_spec is not None:
         cands = _prepend_exact_skill_candidate(cands, registry, exact_spec.skill_id)
-    request = PlanRequest(goal=goal, candidates=cands)
+        cands = filter_candidates_by_goal_policy(cands, goal)
+    request = PlanRequest(goal=goal, candidates=cands, constraints=derive_goal_constraints(goal))
     plan_result = backend.compose(request)
 
     result.initial_status = plan_result.status
@@ -446,8 +458,14 @@ def run_closed_loop(
 
     if diagnosis.reusable_existing_skill and diagnosis.exact_skill_id:
         cands = retrieve_candidates(goal, registry)
+        cands = filter_candidates_by_goal_policy(cands, goal)
         cands = _prepend_exact_skill_candidate(cands, registry, diagnosis.exact_skill_id)
-        retry_request = PlanRequest(goal=goal, candidates=cands)
+        cands = filter_candidates_by_goal_policy(cands, goal)
+        retry_request = PlanRequest(
+            goal=goal,
+            candidates=cands,
+            constraints=derive_goal_constraints(goal),
+        )
         retry_result = backend.compose(retry_request)
         result.replan_status = retry_result.status
         result.replan_plan = retry_result.graph
@@ -548,8 +566,14 @@ def run_closed_loop(
 
     try:
         cands = retrieve_candidates(goal, registry)
+        cands = filter_candidates_by_goal_policy(cands, goal)
         cands = _prepend_exact_skill_candidate(cands, registry, spec.skill_id)
-        request = PlanRequest(goal=goal, candidates=cands)
+        cands = filter_candidates_by_goal_policy(cands, goal)
+        request = PlanRequest(
+            goal=goal,
+            candidates=cands,
+            constraints=derive_goal_constraints(goal),
+        )
         replan_result = backend.compose(request)
 
         result.replan_status = replan_result.status
