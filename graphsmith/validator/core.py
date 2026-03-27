@@ -9,6 +9,13 @@ from graphsmith.models import SkillPackage
 from graphsmith.type_system import validate_type_spec
 
 
+_OP_REQUIRED_EFFECTS: dict[str, set[str]] = {
+    "fs.read_text": {"filesystem_read"},
+    "fs.write_text": {"filesystem_write"},
+    "shell.exec": {"shell_exec"},
+}
+
+
 def _split_address(address: str) -> tuple[str, str]:
     """Split an address into scope and port.
 
@@ -41,6 +48,7 @@ def validate_skill_package(pkg: SkillPackage) -> list[str]:
     _validate_types(pkg)
     _validate_node_ids(pkg)
     _validate_ops(pkg)
+    _validate_op_effect_coverage(pkg)
     _validate_edges(pkg)
     _validate_when_conditions(pkg)
     _validate_binding_conflicts(pkg)
@@ -111,6 +119,18 @@ def _validate_ops(pkg: SkillPackage) -> None:
             raise ValidationError(
                 f"Unknown op '{node.op}' on node '{node.id}'. "
                 f"Allowed: {', '.join(sorted(PRIMITIVE_OPS))}"
+            )
+
+
+def _validate_op_effect_coverage(pkg: SkillPackage) -> None:
+    declared_effects = set(pkg.skill.effects)
+    for node in pkg.graph.nodes:
+        required = _OP_REQUIRED_EFFECTS.get(node.op, set())
+        missing = sorted(required - declared_effects)
+        if missing:
+            raise ValidationError(
+                f"Node '{node.id}' uses op '{node.op}' but skill effects are missing: "
+                f"{', '.join(missing)}"
             )
 
 

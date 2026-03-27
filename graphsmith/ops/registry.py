@@ -7,6 +7,7 @@ from graphsmith.exceptions import OpError
 from graphsmith.ops.array_ops import array_filter, array_map
 from graphsmith.ops.assertion import assert_check
 from graphsmith.ops.branch import branch_if
+from graphsmith.ops.environment import fs_read_text, fs_write_text, shell_exec
 from graphsmith.ops.fallback import fallback_try
 from graphsmith.ops.json_ops import json_pack, json_parse
 from graphsmith.ops.llm import llm_extract, llm_generate
@@ -35,6 +36,8 @@ _PURE_OPS: dict[str, Any] = {
     "fallback.try": fallback_try,
     "array.map": array_map,
     "array.filter": array_filter,
+    "fs.read_text": fs_read_text,
+    "fs.write_text": fs_write_text,
     "text.normalize": text_normalize,
     "text.word_count": text_word_count,
     "text.reverse": text_reverse,
@@ -91,5 +94,8 @@ def execute_op(
             depth=depth,
             call_stack=call_stack or [],
         )
+
+    if op == "shell.exec":
+        return shell_exec(config, inputs)
 
     raise OpError(f"Unknown op '{op}'")

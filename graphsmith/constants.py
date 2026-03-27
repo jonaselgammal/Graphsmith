@@ -14,6 +14,9 @@ PRIMITIVE_OPS = {
     "llm.generate",
     "llm.extract",
     "skill.invoke",
+    "fs.read_text",
+    "fs.write_text",
+    "shell.exec",
     "text.normalize",
     "text.word_count",
     "text.reverse",
@@ -41,4 +44,5 @@ ALLOWED_EFFECTS = {
     "filesystem_write",
     "memory_read",
     "memory_write",
+    "shell_exec",
 }

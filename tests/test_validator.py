@@ -93,6 +93,45 @@ def test_unknown_effect(tmp_path: Path) -> None:
         validate_skill_package(pkg)
 
 
+def test_fs_op_requires_matching_effect(tmp_path: Path) -> None:
+    skill = minimal_skill()
+    skill["effects"] = ["pure"]
+    graph = {
+        "version": 1,
+        "nodes": [
+            {"id": "read", "op": "fs.read_text", "config": {"allow_roots": [str(tmp_path)]}},
+        ],
+        "edges": [{"from": "input.text", "to": "read.path"}],
+        "outputs": {"result": "read.text"},
+    }
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill, graph=graph)
+    with pytest.raises(ValidationError, match="missing: filesystem_read"):
+        validate_skill_package(pkg)
+
+
+def test_shell_exec_op_requires_matching_effect(tmp_path: Path) -> None:
+    skill = {
+        "id": "test.shell_effects.v1",
+        "name": "Shell Effects",
+        "version": "1.0.0",
+        "description": "shell effect coverage",
+        "inputs": [],
+        "outputs": [{"name": "stdout", "type": "string"}],
+        "effects": ["pure"],
+    }
+    graph = {
+        "version": 1,
+        "nodes": [
+            {"id": "run", "op": "shell.exec", "config": {"argv": ["/bin/echo", "x"], "allow_roots": [str(tmp_path)], "cwd": str(tmp_path)}},
+        ],
+        "edges": [],
+        "outputs": {"stdout": "run.stdout"},
+    }
+    pkg = _make_pkg(tmp_path / "pkg", skill=skill, graph=graph)
+    with pytest.raises(ValidationError, match="missing: shell_exec"):
+        validate_skill_package(pkg)
+
+
 # ── invalid types ────────────────────────────────────────────────────
 
 

@@ -199,6 +199,96 @@ class TestRuntimeErrors:
         with pytest.raises(ExecutionError, match="Conflicting bindings"):
             run_skill_package(pkg, {"a": "A", "b": "B"})
 
+    def test_fs_ops_read_and_write_text(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.fs_roundtrip.v1",
+            "name": "FS Roundtrip",
+            "version": "1.0.0",
+            "description": "Write then read text.",
+            "inputs": [
+                {"name": "path", "type": "string", "required": True},
+                {"name": "text", "type": "string", "required": True},
+            ],
+            "outputs": [{"name": "result", "type": "string"}],
+            "effects": ["filesystem_read", "filesystem_write"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {"id": "write", "op": "fs.write_text", "config": {"allow_roots": [str(tmp_path)]}},
+                {"id": "read", "op": "fs.read_text", "config": {"allow_roots": [str(tmp_path)]}},
+            ],
+            "edges": [
+                {"from": "input.path", "to": "write.path"},
+                {"from": "input.text", "to": "write.text"},
+                {"from": "write.path", "to": "read.path"},
+            ],
+            "outputs": {"result": "read.text"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+        target = tmp_path / "note.txt"
+        result = run_skill_package(pkg, {"path": str(target), "text": "hello env"})
+        assert result.outputs == {"result": "hello env"}
+        assert target.read_text(encoding="utf-8") == "hello env"
+
+    def test_shell_exec_runs_bounded_command(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.shell_exec.v1",
+            "name": "Shell Exec",
+            "version": "1.0.0",
+            "description": "Run a simple process.",
+            "inputs": [],
+            "outputs": [{"name": "stdout", "type": "string"}],
+            "effects": ["shell_exec"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "run",
+                    "op": "shell.exec",
+                    "config": {
+                        "argv": ["/bin/echo", "graphsmith"],
+                        "cwd": str(tmp_path),
+                        "allow_roots": [str(tmp_path)],
+                        "check": True,
+                    },
+                },
+            ],
+            "edges": [],
+            "outputs": {"stdout": "run.stdout"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+        result = run_skill_package(pkg, {})
+        assert result.outputs["stdout"].strip() == "graphsmith"
+
+    def test_fs_read_blocks_paths_outside_allowed_roots(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.fs_guard.v1",
+            "name": "FS Guard",
+            "version": "1.0.0",
+            "description": "Guarded file read.",
+            "inputs": [{"name": "path", "type": "string", "required": True}],
+            "outputs": [{"name": "text", "type": "string"}],
+            "effects": ["filesystem_read"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {"id": "read", "op": "fs.read_text", "config": {"allow_roots": [str(tmp_path)]}},
+            ],
+            "edges": [{"from": "input.path", "to": "read.path"}],
+            "outputs": {"text": "read.text"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+        outside = tmp_path.parent / "outside.txt"
+        outside.write_text("blocked", encoding="utf-8")
+        with pytest.raises(ExecutionError, match="outside allowed roots"):
+            run_skill_package(pkg, {"path": str(outside)})
+
 
 # ── multi-node graph ────────────────────────────────────────────────
 
