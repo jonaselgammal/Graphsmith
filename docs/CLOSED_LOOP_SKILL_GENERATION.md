@@ -121,6 +121,13 @@ explicit. Common stop reasons are:
 - For simple text-only multi-stage goals, Graphsmith can now build a
   deterministic linear fallback graph that composes existing skills with the
   generated skill when full replan still fails.
+- That bounded multi-stage fallback now also covers mixed JSON-plus-generated
+  chains such as `json.extract_field -> json.pretty_print -> text.contains`
+  when only one generated text capability is actually missing.
+- If no skill is missing but the planner still fails on a deterministic
+  multi-skill pipeline, Graphsmith can now build a bounded existing-skill
+  fallback for chains like `normalize -> sort_lines -> remove_duplicates ->
+  join_lines`.
 - Generated predicates/transforms like `contains`, `starts_with`, `replace`,
   `strip_prefix`, and `strip_suffix` now expose their variable arguments as
   real graph inputs instead of opaque config values, so they can participate in

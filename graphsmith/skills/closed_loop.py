@@ -41,8 +41,12 @@ _TRANSFORM_SKILL_IDS: dict[str, str] = {
     "title_case": "text.title_case.v1",
     "classify_sentiment": "text.classify_sentiment.v1",
     "word_count": "text.word_count.v1",
+    "sort_lines": "text.sort_lines.v1",
+    "remove_duplicates": "text.remove_duplicates.v1",
+    "join_lines": "text.join_lines.v1",
     "reshape_json": "json.reshape.v1",
     "extract_field": "json.extract_field.v1",
+    "pretty_print": "json.pretty_print.v1",
 }
 
 
@@ -199,7 +203,11 @@ def _goal_has_loop_semantics(goal: str) -> bool:
 
 
 def _goal_needs_multiple_generated_skills(goal: str) -> bool:
-    return len(match_template_keys(goal)) > 1
+    keys = [
+        key for key in match_template_keys(goal)
+        if key not in {"pretty", "join"}
+    ]
+    return len(keys) > 1
 
 
 def _goal_has_filesystem_boundary(goal: str) -> bool:
@@ -361,8 +369,8 @@ def _build_multi_stage_fallback_plan(
     if _goal_needs_multiple_generated_skills(goal):
         return None
 
-    # Keep this bounded to text pipelines for now. Math/JSON mixed chains need
-    # stronger ordering and contract inference than this linear fallback provides.
+    # Keep this bounded to a single generated text skill composed with existing
+    # text/JSON transforms. Math-heavy mixed chains still need stronger ordering.
     if generated_spec.category != "text":
         return None
 
@@ -375,8 +383,39 @@ def _build_multi_stage_fallback_plan(
             return None
         skill_ids.append(skill_id)
 
+    if decomp.presentation == "list":
+        skill_ids.append("text.join_lines.v1")
+
     if generated_spec.skill_id not in skill_ids:
         skill_ids.append(generated_spec.skill_id)
+
+    if len(skill_ids) < 2:
+        return None
+
+    return _build_linear_pipeline_plan(goal, registry, skill_ids)
+
+
+def _build_existing_skill_fallback_plan(
+    goal: str,
+    registry: RegistryBackend,
+) -> GlueGraph | None:
+    """Build a bounded fallback graph using only existing published skills."""
+    if _goal_has_loop_semantics(goal):
+        return None
+
+    decomp = decompose_deterministic(goal)
+    if not decomp.content_transforms:
+        return None
+
+    skill_ids: list[str] = []
+    for transform in decomp.content_transforms:
+        skill_id = _TRANSFORM_SKILL_IDS.get(transform)
+        if skill_id is None:
+            return None
+        skill_ids.append(skill_id)
+
+    if decomp.presentation == "list" and "text.join_lines.v1" not in skill_ids:
+        skill_ids.append("text.join_lines.v1")
 
     if len(skill_ids) < 2:
         return None
@@ -506,6 +545,18 @@ def run_closed_loop(
         return result
 
     if not diagnosis.is_missing:
+        existing_fallback = _build_existing_skill_fallback_plan(goal, registry)
+        if existing_fallback is not None:
+            result.replan_status = "success"
+            result.replan_plan = existing_fallback
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
+            result.stopped_reason = "existing_pipeline_fallback_succeeded"
+            result.success = True
+            return result
         result.stopped_reason = "missing_skill_not_detected"
         return result
 

@@ -769,6 +769,83 @@ class TestClosedLoopOrchestration:
         ]
         assert any(edge.to == "step_3.substring" and edge.from_ == "input.substring" for edge in result.replan_plan.graph.edges)
 
+    def test_multi_stage_fallback_handles_json_pretty_contains(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.contains.v1"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Parse this JSON, extract the value field, pretty print it as JSON, and check whether the formatted result contains a phrase",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "multi_stage_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert [node.config["skill_id"] for node in result.replan_plan.graph.nodes] == [
+            "json.extract_field.v1",
+            "json.pretty_print.v1",
+            "text.contains.v1",
+        ]
+        assert any(edge.to == "step_3.substring" and edge.from_ == "input.substring" for edge in result.replan_plan.graph.edges)
+
+    def test_existing_pipeline_fallback_succeeds_for_sort_dedupe_join(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                self._last_candidates = []
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Take these lines of pseudo-code, normalize them, sort them, remove duplicates, and join them into a readable block",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "existing_pipeline_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert [node.config["skill_id"] for node in result.replan_plan.graph.nodes] == [
+            "text.normalize.v1",
+            "text.sort_lines.v1",
+            "text.remove_duplicates.v1",
+            "text.join_lines.v1",
+        ]
+
 
 # ── Format output ────────────────────────────────────────────────
 
