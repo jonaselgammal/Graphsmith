@@ -375,6 +375,70 @@ class TestClosedLoopOrchestration:
         assert node.op == "skill.invoke"
         assert node.config["skill_id"] == workflow_id
 
+    def test_mixed_environment_workflow_composes_reused_workflow_and_formatter(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        base_goal = "Read a file, title case it, write it to a new file, and then run pytest in the project"
+        mixed_goal = "Read a file, title case it, write it to a new file, run pytest in the project, and prefix each line of the test output"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            seeded = run_closed_loop(
+                base_goal,
+                FailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+            assert seeded.success
+            workflow_entries = [
+                entry for entry in reg.list_all()
+                if "workflow:file_transform_write_pytest" in entry.tags
+            ]
+            assert len(workflow_entries) == 1
+            workflow_id = workflow_entries[0].id
+
+            retrieved = retrieve_candidates(mixed_goal, reg, max_candidates=5)
+            assert workflow_id in {entry.id for entry in retrieved}
+
+            result = run_closed_loop(
+                mixed_goal,
+                FailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "mixed_environment_workflow_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.inputs} == {
+            "input_path", "output_path", "cwd", "prefix",
+        }
+        assert {field.name for field in result.replan_plan.outputs} == {"prefixed"}
+        assert len(result.replan_plan.graph.nodes) == 2
+        node_ids = {
+            node.id: node.config["skill_id"]
+            for node in result.replan_plan.graph.nodes
+            if node.op == "skill.invoke" and isinstance(node.config, dict)
+        }
+        assert node_ids["workflow"] == workflow_id
+        assert node_ids["format_region"].startswith("synth.")
+
     def test_environment_fallback_read_normalize_succeeds(self) -> None:
         class FailBackend:
             _candidate_count = 1

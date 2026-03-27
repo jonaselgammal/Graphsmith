@@ -364,6 +364,13 @@ def _goal_matches_file_transform_write_then_pytest(goal: str) -> bool:
     )
 
 
+def _goal_matches_file_transform_write_then_pytest_prefix(goal: str) -> bool:
+    goal_lower = goal.lower()
+    if "prefix" not in goal_lower:
+        return False
+    return _goal_matches_file_transform_write_then_pytest(goal)
+
+
 def _goal_supports_environment_fallback(goal: str) -> bool:
     return any((
         _goal_matches_read_normalize(goal),
@@ -374,6 +381,7 @@ def _goal_supports_environment_fallback(goal: str) -> bool:
         _goal_matches_pytest_prefix_branch(goal),
         _goal_matches_loop_read_contains(goal),
         _goal_matches_file_transform_write_then_pytest(goal),
+        _goal_matches_file_transform_write_then_pytest_prefix(goal),
     ))
 
 
@@ -1321,6 +1329,128 @@ def _build_file_transform_write_then_pytest_plan(
     return outer, refs
 
 
+def _build_file_transform_write_then_pytest_prefix_plan(
+    goal: str,
+    registry: RegistryBackend,
+    *,
+    output_dir: str | Path | None = None,
+) -> tuple[GlueGraph | None, list[tuple[str, str, str]]]:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    if not _goal_matches_file_transform_write_then_pytest_prefix(goal):
+        return None, []
+
+    decomp = decompose_deterministic(goal)
+    transform = decomp.content_transforms[0]
+    workflow_entry = _find_reusable_synthesized_skill(
+        registry,
+        required_inputs={"input_path", "output_path", "cwd"},
+        required_outputs={"stdout"},
+        required_effects={"filesystem_read", "filesystem_write", "shell_exec"},
+        required_tags={"workflow:file_transform_write_pytest", f"transform:{transform}"},
+    )
+
+    refs: list[tuple[str, str, str]] = []
+    if workflow_entry is None:
+        _workflow_plan, workflow_refs = _build_file_transform_write_then_pytest_plan(
+            goal,
+            registry,
+            output_dir=output_dir,
+        )
+        refs.extend(workflow_refs)
+        workflow_entry = _find_reusable_synthesized_skill(
+            registry,
+            required_inputs={"input_path", "output_path", "cwd"},
+            required_outputs={"stdout"},
+            required_effects={"filesystem_read", "filesystem_write", "shell_exec"},
+            required_tags={"workflow:file_transform_write_pytest", f"transform:{transform}"},
+        )
+    if workflow_entry is None:
+        return None, refs
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if "text.prefix_lines.v1" not in available:
+        return None, refs
+
+    formatter_region = GlueGraph(
+        goal=f"{goal} :: formatter region",
+        inputs=[
+            IOField(name="stdout", type="string"),
+            IOField(name="prefix", type="string"),
+        ],
+        outputs=[IOField(name="prefixed", type="string")],
+        effects=["pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(
+                    id="prefix_lines",
+                    op="skill.invoke",
+                    config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
+                )
+            ],
+            edges=[
+                GraphEdge(from_="input.stdout", to="prefix_lines.text"),
+                GraphEdge(from_="input.prefix", to="prefix_lines.prefix"),
+            ],
+            outputs={"prefixed": "prefix_lines.prefixed"},
+        ),
+    )
+    formatter_plan, formatter_skill_id, formatter_dir = _materialize_subgraph_skill(
+        goal,
+        formatter_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="pytest_output_formatter",
+        extra_tags=["coding", "environment", "region:format_output", "formatting", "prefix"],
+    )
+    if formatter_plan is None:
+        return None, refs
+
+    outer = GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="input_path", type="string"),
+            IOField(name="output_path", type="string"),
+            IOField(name="cwd", type="string"),
+            IOField(name="prefix", type="string"),
+        ],
+        outputs=[IOField(name="prefixed", type="string")],
+        effects=["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(
+                    id="workflow",
+                    op="skill.invoke",
+                    config={"skill_id": workflow_entry.id, "version": workflow_entry.version},
+                ),
+                GraphNode(
+                    id="format_region",
+                    op="skill.invoke",
+                    config={"skill_id": formatter_skill_id, "version": "1.0.0"},
+                ),
+            ],
+            edges=[
+                GraphEdge(from_="input.input_path", to="workflow.input_path"),
+                GraphEdge(from_="input.output_path", to="workflow.output_path"),
+                GraphEdge(from_="input.cwd", to="workflow.cwd"),
+                GraphEdge(from_="workflow.stdout", to="format_region.stdout"),
+                GraphEdge(from_="input.prefix", to="format_region.prefix"),
+            ],
+            outputs={"prefixed": "format_region.prefixed"},
+        ),
+    )
+
+    refs.extend([
+        (workflow_entry.id, workflow_entry.version, ""),
+        (formatter_skill_id, "1.0.0", formatter_dir),
+    ])
+    return outer, refs
+
+
 def _build_environment_fallback_plan(
     goal: str,
     registry: RegistryBackend,
@@ -1857,6 +1987,9 @@ def _environment_workflow_grounding_failure(
         required_skill_ids = {"parallel.map"}
         required_inputs = {"paths", "substring"}
         required_outputs = {"result"}
+    elif _goal_matches_file_transform_write_then_pytest_prefix(goal):
+        required_inputs = {"input_path", "output_path", "cwd", "prefix"}
+        required_outputs = {"prefixed"}
     elif _goal_matches_file_transform_write_then_pytest(goal):
         required_inputs = {"input_path", "output_path", "cwd"}
         required_outputs = {"stdout"}
@@ -1878,6 +2011,10 @@ def _environment_workflow_grounding_failure(
         missing_skills = sorted(required_skill_ids - skill_ids)
         if missing_skills:
             return "missing_environment_skills:" + ",".join(missing_skills)
+    elif _goal_matches_file_transform_write_then_pytest_prefix(goal):
+        invoke_count = sum(1 for node in graph.graph.nodes if node.op == "skill.invoke")
+        if invoke_count < 2:
+            return "missing_environment_regions:workflow_and_formatter"
     elif _goal_matches_file_transform_write_then_pytest(goal):
         invoke_count = sum(1 for node in graph.graph.nodes if node.op == "skill.invoke")
         if invoke_count < 2:
@@ -1962,6 +2099,26 @@ def run_closed_loop(
         and not environment_grounding_failure
     ):
         result.stopped_reason = "initial_plan_succeeded"
+        result.success = True
+        return result
+
+    mixed_environment_fallback, mixed_refs = _build_file_transform_write_then_pytest_prefix_plan(
+        goal,
+        registry,
+        output_dir=output_dir,
+    )
+    if mixed_environment_fallback is not None:
+        result.replan_status = "success"
+        result.replan_plan = mixed_environment_fallback
+        if mixed_refs:
+            result.synthesized_skill_id = ",".join(skill_id for skill_id, _, _ in mixed_refs)
+            result.synthesis_dir = ",".join(path for _, _, path in mixed_refs if path)
+        block_reason = _semantic_fidelity_block_reason(goal)
+        if block_reason:
+            result.stopped_reason = block_reason
+            result.success = False
+            return result
+        result.stopped_reason = "mixed_environment_workflow_fallback_succeeded"
         result.success = True
         return result
 
