@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -55,375 +57,6 @@ def list_ops() -> None:
     from graphsmith.constants import PRIMITIVE_OPS
     for op in sorted(PRIMITIVE_OPS):
         typer.echo(op)
-
-
-# ── create-skill ──────────────────────────────────────────────────────
-
-
-@app.command("create-skill")
-def create_skill(
-    name: str = typer.Argument(..., help="Skill ID (e.g. text.uppercase.v1)"),
-    output_dir: str = typer.Option("examples/skills", "--output-dir", "-o",
-                                    help="Parent directory for the new skill."),
-) -> None:
-    """Generate a new skill scaffold with boilerplate files."""
-    from graphsmith.skills.template import create_skill_template
-
-    path = create_skill_template(name, output_dir)
-    typer.secho(f"Created skill scaffold: {path}", fg=typer.colors.GREEN)
-    typer.echo("  Files:")
-    typer.echo(f"    {path}/skill.yaml   — metadata + I/O spec")
-    typer.echo(f"    {path}/graph.yaml   — execution graph")
-    typer.echo(f"    {path}/examples.yaml — test examples")
-    typer.echo("")
-    typer.echo("  Next steps:")
-    typer.echo(f"    1. Edit the files above")
-    typer.echo(f"    2. Implement the op in graphsmith/ops/")
-    typer.echo(f"    3. Register it in graphsmith/ops/registry.py")
-    typer.echo(f"    4. graphsmith validate {path}")
-
-
-# ── solve (closed-loop) ───────────────────────────────────────────────
-
-
-@app.command("solve")
-def solve(
-    goal: str = typer.Argument(..., help="Natural language goal to solve."),
-    provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
-    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
-    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL."),
-    candidates: int = typer.Option(3, "--candidates", help="Number of IR candidates."),
-    auto_approve: bool = typer.Option(False, "--auto-approve", help="Skip confirmation for generated skills."),
-    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Dir for generated skill files."),
-) -> None:
-    """Solve a goal with closed-loop missing-skill generation.
-
-    If the initial plan fails due to a missing simple skill, Graphsmith
-    generates it, validates it, and replans. Bounded to one deterministic
-    single-step skill per attempt.
-    """
-    import tempfile
-    from pathlib import Path
-
-    if model is None:
-        model = "claude-haiku-4-5-20251001" if provider == "anthropic" else "llama-3.1-8b-instant"
-
-    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
-    if not skills_dir.is_dir():
-        typer.secho("ERROR: examples/skills/ not found.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-
-    reg_dir = tempfile.mkdtemp()
-    from graphsmith.registry.local import LocalRegistry
-    from graphsmith.parser import load_skill_package
-
-    reg = LocalRegistry(reg_dir)
-    for d in sorted(skills_dir.iterdir()):
-        if d.is_dir() and (d / "skill.yaml").exists():
-            try:
-                reg.publish(load_skill_package(str(d)))
-            except Exception:
-                pass
-
-    try:
-        from graphsmith.ops.providers import create_provider
-        llm = create_provider(provider, model=model, base_url=base_url)
-    except Exception as exc:
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-
-    from graphsmith.planner.ir_backend import IRPlannerBackend
-    from graphsmith.skills.closed_loop import format_closed_loop_result, run_closed_loop
-
-    backend = IRPlannerBackend(llm, candidate_count=candidates, use_decomposition=True)
-
-    def confirm(msg: str) -> bool:
-        return typer.confirm(f"  {msg}", default=False)
-
-    gen_dir = output_dir or str(Path(tempfile.mkdtemp()) / "generated_skills")
-
-    typer.echo(f"\n  Solving: {goal}\n")
-
-    result = run_closed_loop(
-        goal, backend, reg,
-        output_dir=gen_dir,
-        auto_approve=auto_approve,
-        confirm_fn=confirm,
-    )
-
-    typer.echo(format_closed_loop_result(result))
-    typer.echo("")
-
-
-# ── export-graph ──────────────────────────────────────────────────────
-
-
-@app.command("export-graph")
-def export_graph(
-    plan_file: str = typer.Argument(..., help="Path to a saved plan JSON file."),
-    format: str = typer.Option("dot", "--format", "-f", help="Output format: dot, json, or ascii."),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path."),
-) -> None:
-    """Export a compiled graph to DOT, JSON, or ASCII format."""
-    from graphsmith.graph_export import graph_to_ascii, graph_to_dot, graph_to_json
-    from graphsmith.planner.composer import load_plan
-
-    try:
-        glue = load_plan(plan_file)
-    except Exception as exc:
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-
-    if format == "dot":
-        result = graph_to_dot(glue)
-    elif format == "json":
-        result = json.dumps(graph_to_json(glue), indent=2)
-    elif format == "ascii":
-        result = graph_to_ascii(glue)
-    else:
-        typer.secho(f"Unknown format: {format}. Use dot, json, or ascii.", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-    if output:
-        Path(output).write_text(result + "\n", encoding="utf-8")
-        typer.secho(f"Written to {output}", fg=typer.colors.GREEN)
-    else:
-        typer.echo(result)
-
-
-# ── create-skill-from-goal ────────────────────────────────────────────
-
-
-@app.command("create-skill-from-goal")
-def create_skill_from_goal(
-    goal: str = typer.Argument(..., help="Natural language description (e.g. 'uppercase text')"),
-    output_dir: str = typer.Option("examples/skills", "--output-dir", "-o",
-                                    help="Parent directory for the new skill."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show spec without generating files."),
-) -> None:
-    """Auto-generate a skill from a natural language description.
-
-    Supports simple deterministic ops: text transforms, math, JSON access.
-    Generated skills include implementation, validation, and example tests.
-    """
-    from graphsmith.skills.autogen import (
-        AutogenError,
-        extract_spec,
-        format_result,
-        generate_op_code,
-        generate_skill_files,
-        validate_and_test,
-    )
-
-    # Extract spec
-    try:
-        spec = extract_spec(goal)
-    except AutogenError as exc:
-        typer.secho(f"  {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-
-    typer.echo("")
-    typer.echo(f"  Skill: {spec.skill_id}")
-    typer.echo(f"  Op: {spec.op_name}")
-    typer.echo(f"  Description: {spec.description}")
-    typer.echo(f"  Template: {spec.template_key}")
-    typer.echo("")
-
-    if dry_run:
-        typer.echo("  [dry-run] Op code:")
-        typer.echo("")
-        for line in generate_op_code(spec).split("\n"):
-            typer.echo(f"    {line}")
-        typer.echo("")
-        return
-
-    # Check for existing skill
-    from pathlib import Path
-    skill_path = Path(output_dir) / spec.skill_id
-    if skill_path.exists():
-        typer.secho(f"  Skill already exists: {skill_path}", fg=typer.colors.YELLOW)
-        typer.echo("  Use --output-dir to generate elsewhere, or remove the existing skill first.")
-        raise typer.Exit(code=1)
-
-    # Generate files
-    skill_dir = generate_skill_files(spec, output_dir)
-
-    # Validate + test
-    result = validate_and_test(spec, skill_dir)
-    typer.echo(format_result(result, skill_dir))
-
-    all_pass = (result["validation"] == "PASS" and
-                result["examples_passed"] == result["examples_total"])
-    if all_pass:
-        typer.echo("")
-        typer.secho("  Ready to use.", fg=typer.colors.GREEN)
-        typer.echo(f"  Publish: graphsmith publish {skill_dir} --registry $REG")
-    else:
-        typer.echo("")
-        typer.secho("  Generated with issues. Review before publishing.", fg=typer.colors.YELLOW)
-    typer.echo("")
-
-
-# ── doctor ───────────────────────────────────────────────────────────
-
-
-@app.command()
-def doctor() -> None:
-    """Check system readiness: Python, dependencies, API keys."""
-    import os
-    import sys
-
-    ok_count = 0
-    fail_count = 0
-
-    def _ok(msg: str) -> None:
-        nonlocal ok_count
-        ok_count += 1
-        typer.echo(f"  \u2714 {msg}")
-
-    def _fail(msg: str) -> None:
-        nonlocal fail_count
-        fail_count += 1
-        typer.secho(f"  \u2716 {msg}", fg=typer.colors.RED)
-
-    typer.echo("")
-    typer.echo("  Graphsmith Doctor")
-    typer.echo("  =================")
-    typer.echo("")
-
-    # Python version
-    v = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    if sys.version_info >= (3, 11):
-        _ok(f"Python {v}")
-    else:
-        _fail(f"Python {v} (need >= 3.11)")
-
-    # Core dependencies
-    for pkg, label in [("pydantic", "pydantic"), ("typer", "typer"), ("yaml", "PyYAML"), ("httpx", "httpx")]:
-        try:
-            __import__(pkg)
-            _ok(f"{label} installed")
-        except ImportError:
-            _fail(f"{label} not installed (pip install -e '.[dev]')")
-
-    # .env file
-    from pathlib import Path
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    if env_path.is_file():
-        _ok(".env file found")
-    else:
-        _fail(".env file not found (cp .env.example .env)")
-
-    # API keys
-    # Trigger .env loading
-    try:
-        from graphsmith.ops.providers import _load_dotenv
-        _load_dotenv()
-    except Exception:
-        pass
-
-    anthropic_key = os.environ.get("GRAPHSMITH_ANTHROPIC_API_KEY", "")
-    groq_key = os.environ.get("GRAPHSMITH_GROQ_API_KEY", "")
-    openai_key = os.environ.get("GRAPHSMITH_OPENAI_API_KEY", "")
-
-    if anthropic_key:
-        _ok("Anthropic API key set")
-    else:
-        _fail("Anthropic API key missing (GRAPHSMITH_ANTHROPIC_API_KEY)")
-
-    if groq_key or openai_key:
-        label = "Groq" if groq_key else "OpenAI"
-        _ok(f"{label} API key set")
-    else:
-        _fail("No Groq/OpenAI key (GRAPHSMITH_GROQ_API_KEY or GRAPHSMITH_OPENAI_API_KEY)")
-
-    has_any_key = bool(anthropic_key or groq_key or openai_key)
-
-    # Skills
-    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
-    if skills_dir.is_dir():
-        count = sum(1 for d in skills_dir.iterdir() if d.is_dir())
-        _ok(f"{count} example skills found")
-    else:
-        _fail("examples/skills/ not found")
-
-    # Summary
-    typer.echo("")
-    if fail_count == 0:
-        typer.secho("  All checks passed. System is ready.", fg=typer.colors.GREEN)
-    elif has_any_key:
-        typer.secho(f"  {ok_count} passed, {fail_count} issue(s). System is partially ready.",
-                    fg=typer.colors.YELLOW)
-    else:
-        typer.secho(f"  {ok_count} passed, {fail_count} issue(s). Fix the issues above.",
-                    fg=typer.colors.RED)
-    typer.echo("")
-
-
-# ── run (interactive) ────────────────────────────────────────────────
-
-
-@app.command("run-interactive")
-def run_interactive(
-    provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
-    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
-    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible."),
-    candidates: int = typer.Option(3, "--candidates", help="Number of IR candidates."),
-    decompose: bool = typer.Option(True, "--decompose/--no-decompose", help="Enable semantic decomposition."),
-) -> None:
-    """Interactive planning session with candidate inspection.
-
-    Type a natural language goal to plan it. Use :help to see commands
-    for inspecting candidates, comparing alternatives, and rerunning.
-    """
-    import tempfile
-    from pathlib import Path
-
-    # Resolve model default
-    if model is None:
-        if provider == "anthropic":
-            model = "claude-haiku-4-5-20251001"
-        elif provider == "openai":
-            model = "llama-3.1-8b-instant"
-        else:
-            model = "default"
-
-    # Build registry
-    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
-    if not skills_dir.is_dir():
-        typer.secho("ERROR: examples/skills/ not found.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1)
-
-    reg_dir = tempfile.mkdtemp()
-    from graphsmith.registry.local import LocalRegistry
-    from graphsmith.parser import load_skill_package
-
-    reg = LocalRegistry(reg_dir)
-    for d in sorted(skills_dir.iterdir()):
-        if d.is_dir() and (d / "skill.yaml").exists():
-            try:
-                pkg = load_skill_package(str(d))
-                reg.publish(pkg)
-            except Exception:
-                pass
-
-    # Build backend
-    try:
-        from graphsmith.ops.providers import create_provider
-        llm = create_provider(provider, model=model, base_url=base_url)
-    except Exception as exc:
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        typer.echo("Run 'graphsmith doctor' to check your setup.", err=True)
-        raise typer.Exit(code=1) from exc
-
-    from graphsmith.planner.ir_backend import IRPlannerBackend
-    from graphsmith.cli.interactive import InteractiveSession
-
-    backend = IRPlannerBackend(llm, candidate_count=candidates, use_decomposition=decompose)
-    session = InteractiveSession(
-        backend, reg, provider_name=provider, model_name=model,
-    )
-    session.run()
 
 
 @app.command("list-models")
@@ -659,6 +292,42 @@ def publish(
         typer.secho(f"  Warning: {w}", fg=typer.colors.YELLOW, err=True)
 
 
+@app.command("remote-publish")
+def remote_publish(
+    path: str,
+    remote_registry: str = typer.Option(..., "--remote-registry", help="Remote registry URL or file-backed registry root."),
+    remote_token: Optional[str] = typer.Option(
+        None, "--remote-token",
+        help="Bearer token for remote publish. Falls back to GRAPHSMITH_REMOTE_TOKEN.",
+    ),
+    remote_cache: Optional[str] = typer.Option(
+        None, "--remote-cache",
+        help="Optional remote cache directory. Falls back to GRAPHSMITH_REMOTE_CACHE.",
+    ),
+    skip_existing: bool = typer.Option(
+        False, "--skip-existing",
+        help="Treat already-published remote skills as a non-fatal success.",
+    ),
+) -> None:
+    """Publish a validated skill package to a remote registry."""
+    reg = _make_remote_registry(remote_registry, remote_token=remote_token, remote_cache=remote_cache)
+    try:
+        entry, warnings = reg.publish(path)
+    except (ParseError, ValidationError, RegistryError) as exc:
+        text = str(exc)
+        if skip_existing and ("(409)" in text or "already published" in text):
+            typer.secho(f"Skipped existing: {path}", fg=typer.colors.YELLOW)
+            return
+        typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.secho(
+        f"Remote published: {entry.id} v{entry.version}", fg=typer.colors.GREEN
+    )
+    for w in warnings:
+        typer.secho(f"  Warning: {w}", fg=typer.colors.YELLOW, err=True)
+
+
 # ── search ───────────────────────────────────────────────────────────
 
 
@@ -673,11 +342,13 @@ def search(
         None, "--registry",
         help="Custom registry root (default: ~/.graphsmith/registry).",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
 ) -> None:
     """Search published skills in the local registry."""
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     results = reg.search(
         query,
         effect=effect,
@@ -704,11 +375,13 @@ def show(
         None, "--registry",
         help="Custom registry root (default: ~/.graphsmith/registry).",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
 ) -> None:
     """Show details of a published skill."""
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     try:
         pkg = reg.fetch(skill_id, version)
     except RegistryError as exc:
@@ -744,6 +417,10 @@ def plan(
     registry_root: Optional[str] = typer.Option(
         None, "--registry",
         help="Custom registry root (default: ~/.graphsmith/registry).",
+    ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
     ),
     max_candidates: int = typer.Option(
         20, "--max-candidates",
@@ -788,9 +465,7 @@ def plan(
 ) -> None:
     """Plan a glue graph from a natural-language goal."""
     from graphsmith.planner import compose_plan, save_plan
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
     )
@@ -825,11 +500,21 @@ def plan(
         for c in result.candidates_considered:
             typer.echo(f"  - {c}")
 
+    if result.repair_actions:
+        typer.echo(f"\nRepairs applied ({len(result.repair_actions)}):")
+        for action in result.repair_actions:
+            typer.echo(f"  - {action}")
+
     if show_retrieval and result.retrieval:
         typer.echo(
             f"\nRetrieval [{result.retrieval.mode}] "
             f"({result.retrieval.candidate_count} candidates):"
         )
+        typer.echo(f"  Registry size: {result.retrieval.registry_size}")
+        if result.retrieval.empty_registry:
+            typer.echo("  Registry is empty.")
+        elif result.retrieval.fallback_used:
+            typer.echo("  Fallback used: no positive lexical matches, returning registry entries.")
         if result.retrieval.raw_tokens:
             typer.echo(f"  Raw tokens: {', '.join(result.retrieval.raw_tokens)}")
         if result.retrieval.expanded_tokens:
@@ -876,6 +561,10 @@ def plan_and_run(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Custom registry root.",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     backend: str = typer.Option("auto", "--backend", help="Planner backend: auto, mock, llm, or ir."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM ops."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai."),
@@ -892,15 +581,19 @@ def plan_and_run(
     """Plan a glue graph and execute it in one step."""
     from graphsmith.ops.llm_provider import EchoLLMProvider
     from graphsmith.planner import compose_plan, run_glue_graph
-    from graphsmith.registry import LocalRegistry
     from graphsmith.traces import TraceStore
 
     inputs = _resolve_inputs(input, input_file)
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
     )
-    llm_provider = EchoLLMProvider(prefix="") if mock_llm else None
+    llm_provider = _make_execution_provider(
+        mock_llm,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+    )
 
     # 1. Plan
     result = compose_plan(goal, reg, planner_backend)
@@ -937,9 +630,15 @@ def plan_and_run(
             "plan": {"goal": result.graph.goal, "status": result.status},
             "outputs": exec_result.outputs,
         }
+        if getattr(exec_result, "repairs", None):
+            out["runtime_repairs"] = exec_result.repairs
         typer.echo(json.dumps(out, indent=2))
     else:
         typer.echo(json.dumps(exec_result.outputs, indent=2))
+        if getattr(exec_result, "repairs", None):
+            typer.echo("\nRuntime repairs:")
+            for action in exec_result.repairs:
+                typer.echo(f"  - {action}")
 
     if trace:
         typer.echo("\n--- trace ---")
@@ -960,18 +659,21 @@ def run_plan_cmd(
     ),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM ops."),
     registry_root: Optional[str] = typer.Option(None, "--registry", help="Custom registry root."),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     trace_root: Optional[str] = typer.Option(None, "--trace-root", help="Persist trace."),
     trace: bool = typer.Option(False, "--trace", help="Print trace after outputs."),
 ) -> None:
     """Run a previously saved plan."""
     from graphsmith.ops.llm_provider import EchoLLMProvider
     from graphsmith.planner import load_plan, run_glue_graph
-    from graphsmith.registry import LocalRegistry
     from graphsmith.traces import TraceStore
 
     inputs = _resolve_inputs(input, input_file)
     llm_provider = EchoLLMProvider(prefix="") if mock_llm else None
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
 
     try:
         glue = load_plan(path)
@@ -1130,8 +832,15 @@ def promote_candidates(
     typer.echo(f"Promotion candidates ({len(candidates)}):\n")
     for c in candidates:
         typer.echo(f"  Signature: {c.signature}")
+        if c.structural_signature and c.structural_signature != c.signature:
+            typer.echo(f"  Structural: {c.structural_signature}")
         typer.echo(f"  Frequency: {c.frequency}")
+        typer.echo(f"  Confidence: {c.confidence:.2f}")
         typer.echo(f"  Ops: {' -> '.join(c.ops)}")
+        if c.suggested_skill_id:
+            typer.echo(f"  Suggested skill: {c.suggested_skill_id}")
+        if c.suggested_name:
+            typer.echo(f"  Suggested name: {c.suggested_name}")
         typer.echo(f"  Traces: {', '.join(c.trace_ids[:5])}"
                    + (f" (+{len(c.trace_ids)-5} more)" if len(c.trace_ids) > 5 else ""))
         if c.inferred_inputs:
@@ -1154,64 +863,74 @@ def promote_candidates(
         typer.echo()
 
 
+@app.command("solve")
+def solve(
+    goal: str = typer.Argument(help="Natural-language goal to solve with closed-loop generation."),
+    registry: Optional[str] = typer.Option(None, "--registry", help="Registry root with published skills."),
+    remote_registry: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
+    backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, openai, groq, or ollama."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name override for supported providers."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL override for OpenAI-compatible providers."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo provider for planning/execution."),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Skip confirmation before replanning with a generated skill."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", min=1, max=8, help="Number of IR candidates to generate and rerank."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition before IR generation."),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", help="Directory for generated skill files."),
+) -> None:
+    """Attempt bounded closed-loop missing-skill generation and replanning."""
+    from graphsmith.skills.closed_loop import format_closed_loop_result, run_closed_loop
+
+    reg = _make_registry_backend(registry, remote_registry, create_temp_local=True)
+    planner_backend = _make_planner_backend(
+        backend,
+        mock_llm,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        ir_candidates=ir_candidates,
+        use_decomposition=use_decomposition,
+    )
+    result = run_closed_loop(
+        goal,
+        planner_backend,
+        reg,
+        output_dir=output_dir,
+        auto_approve=auto_approve,
+    )
+    typer.echo(format_closed_loop_result(result))
+
+
 # ── ui ───────────────────────────────────────────────────────────────
 
 
 @app.command()
 def ui(
     port: int = typer.Option(8741, "--port", help="Local server port."),
-    provider: str = typer.Option("anthropic", "--provider", help="LLM provider."),
-    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
-    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL."),
-    candidates: int = typer.Option(3, "--candidates", help="IR candidates."),
 ) -> None:
-    """Launch the local graph UI for plan inspection and refinement."""
+    """Launch the local plan inspector UI in your browser."""
     import http.server
-    import tempfile
     import threading
     import webbrowser
-
-    if model is None:
-        model = "claude-haiku-4-5-20251001" if provider == "anthropic" else "llama-3.1-8b-instant"
 
     ui_dir = Path(__file__).resolve().parent.parent.parent / "ui"
     if not (ui_dir / "index.html").exists():
         typer.secho("FAIL: ui/index.html not found.", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    # Build registry
-    skills_dir = Path(__file__).resolve().parents[2] / "examples" / "skills"
-    reg_dir = tempfile.mkdtemp()
-    from graphsmith.registry.local import LocalRegistry
-    from graphsmith.parser import load_skill_package
-
-    reg = LocalRegistry(reg_dir)
-    for d in sorted(skills_dir.iterdir()):
-        if d.is_dir() and (d / "skill.yaml").exists():
-            try:
-                reg.publish(str(d))
-            except Exception:
-                pass
-
-    # Build backend
-    try:
-        from graphsmith.ops.providers import create_provider
-        llm = create_provider(provider, model=model, base_url=base_url)
-    except Exception as exc:
-        typer.secho(f"ERROR: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-
-    from graphsmith.planner.ir_backend import IRPlannerBackend
-    from graphsmith.ui.server import UIState, create_handler
-
-    backend = IRPlannerBackend(llm, candidate_count=candidates, use_decomposition=True)
-    state = UIState(backend, reg)
-    Handler = create_handler(state, ui_dir)
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, directory=str(ui_dir), **kwargs)
+        def log_message(self, fmt: str, *args: Any) -> None:
+            pass  # suppress request logs
 
     url = f"http://localhost:{port}"
-    typer.echo(f"Graphsmith UI running at {url}")
-    typer.echo(f"Provider: {provider} | Model: {model} | Candidates: {candidates}")
+    typer.echo(f"Graphsmith Inspector running at {url}")
     typer.echo("Press Ctrl+C to stop.\n")
+    typer.echo(f"Open a plan: drag a JSON file onto the page, or use the file picker.")
 
     server = http.server.HTTPServer(("localhost", port), Handler)
     threading.Timer(0.5, lambda: webbrowser.open(url)).start()
@@ -1275,6 +994,10 @@ def eval_planner(
     registry_root: Optional[str] = typer.Option(
         None, "--registry", help="Registry root with published skills.",
     ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
     backend: str = typer.Option("auto", "--backend", help="Planner backend: auto, mock, llm (direct graph), or ir (semantic IR + compiler + reranking)."),
     mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
     provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
@@ -1298,9 +1021,7 @@ def eval_planner(
     Recommended: --backend ir --ir-candidates 3 --decompose
     """
     from graphsmith.evaluation.planner_eval import compare_retrieval_modes, load_goals, run_evaluation
-    from graphsmith.registry import LocalRegistry
-
-    reg = LocalRegistry(registry_root) if registry_root else LocalRegistry()
+    reg = _make_registry_backend(registry_root, remote_registry_root)
     planner_backend = _make_planner_backend(
         backend, mock_llm, provider=provider, model=model, base_url=base_url,
         ir_candidates=ir_candidates, use_decomposition=use_decomposition,
@@ -1425,7 +1146,187 @@ def eval_planner(
                 typer.echo(f"         error: {r.error[:150]}")
 
 
+@app.command("eval-frontier")
+def eval_frontier(
+    goals_dir: str = typer.Option(
+        "evaluation/frontier_goals", "--goals",
+        help="Directory containing frontier goal JSON files.",
+    ),
+    registry_root: Optional[str] = typer.Option(
+        None, "--registry", help="Registry root with published skills.",
+    ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional file-backed remote registry root to merge with the local registry.",
+    ),
+    backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai (Groq/Ollama compatible)."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible providers."),
+    output_format: str = typer.Option("text", "--output-format", help="text or json."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates to generate and rerank."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition stage before IR generation."),
+) -> None:
+    """Run the cross-domain frontier suite through the closed-loop solve path."""
+    from graphsmith.evaluation.frontier_eval import load_frontier_cases, run_frontier_suite
+    reg = _make_registry_backend(registry_root, remote_registry_root)
+    planner_backend = _make_planner_backend(
+        backend, mock_llm, provider=provider, model=model, base_url=base_url,
+        ir_candidates=ir_candidates, use_decomposition=use_decomposition,
+    )
+    cases = load_frontier_cases(goals_dir)
+    report = run_frontier_suite(
+        cases,
+        reg,
+        planner_backend,
+        provider_name=provider,
+        model_name=model or "",
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.model_dump(), indent=2))
+        return
+
+    typer.echo(f"Frontier Evaluation ({report.provider} {report.model})")
+    typer.echo(f"Passed: {report.passed}/{report.total} ({report.pass_rate * 100:.1f}%)")
+    for result in report.results:
+        typer.echo(
+            f"  [{result.status}] {result.id} tier={result.tier} "
+            f"expected_success={result.expected_success} observed_success={result.observed_success}"
+        )
+        typer.echo(f"       goal: {result.goal}")
+        typer.echo(
+            f"       initial={result.initial_status} missing={result.detected_missing} "
+            f"generated={result.generated_skill_id or '-'} replan={result.replan_status or '-'} "
+            f"stopped={result.stopped_reason}"
+        )
+
+
+@app.command("eval-stress-frontier")
+def eval_stress_frontier(
+    goals_dir: str = typer.Option(
+        "evaluation/stress_frontier_goals", "--goals",
+        help="Directory containing stress frontier goal JSON files.",
+    ),
+    registry_root: Optional[str] = typer.Option(
+        None, "--registry", help="Registry root with published skills.",
+    ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional remote registry root or URL to merge with the local registry.",
+    ),
+    backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible providers."),
+    output_format: str = typer.Option("text", "--output-format", help="text or json."),
+    mode: str = typer.Option("isolated", "--mode", help="isolated or cumulative registry mode."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates to generate and rerank."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition stage before IR generation."),
+) -> None:
+    """Run the harder stress-frontier suite with isolated or cumulative registry growth."""
+    from graphsmith.evaluation.stress_eval import load_stress_cases, run_stress_suite
+
+    reg = _make_registry_backend(registry_root, remote_registry_root)
+    planner_backend = _make_planner_backend(
+        backend, mock_llm, provider=provider, model=model, base_url=base_url,
+        ir_candidates=ir_candidates, use_decomposition=use_decomposition,
+    )
+    cases = load_stress_cases(goals_dir)
+    report = run_stress_suite(
+        cases,
+        reg,
+        planner_backend,
+        provider_name=provider,
+        model_name=model or "",
+        mode=mode,
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.model_dump(), indent=2))
+        return
+
+    typer.echo(f"Stress Frontier Evaluation ({report.provider} {report.model})")
+    typer.echo(
+        f"Mode: {report.mode}  Passed: {report.passed}/{report.total} "
+        f"({report.pass_rate * 100:.1f}%)  Generated cases: {report.generated_cases}  "
+        f"Unique generated skills: {report.unique_generated_skill_count}"
+    )
+    typer.echo(
+        f"Registry size: {report.start_registry_size} -> {report.final_registry_size} "
+        f"(growth: {report.registry_growth})"
+    )
+    if report.stop_reason_counts:
+        typer.echo(f"Stop reasons: {json.dumps(report.stop_reason_counts, sort_keys=True)}")
+    if report.promotion_candidates:
+        typer.echo("Promotion candidates:")
+        for candidate in report.promotion_candidates[:5]:
+            typer.echo(
+                f"  - {candidate.suggested_skill_id}  freq={candidate.frequency} "
+                f"confidence={candidate.confidence:.2f}"
+            )
+    for result in report.results:
+        typer.echo(
+            f"  [{result.status}] {result.id} tier={result.tier} "
+            f"expected_success={result.expected_success} observed_success={result.observed_success}"
+        )
+        typer.echo(f"       goal: {result.goal}")
+        typer.echo(
+            f"       generated={result.generated_skill_id or '-'} "
+            f"used_in_plan={result.generated_skill_used_in_plan} "
+            f"reused_existing={result.reused_existing_skill_count} "
+            f"nodes={result.node_count} stopped={result.stopped_reason}"
+        )
+
+
 # ── helpers ──────────────────────────────────────────────────────────
+
+
+def _make_registry_backend(
+    registry_root: str | None,
+    remote_registry_root: str | None = None,
+    *,
+    create_temp_local: bool = False,
+) -> Any:
+    from graphsmith.registry import (
+        AggregatedRegistry,
+        FileRemoteRegistry,
+        LocalRegistry,
+        RemoteRegistryClient,
+    )
+
+    if registry_root:
+        local = LocalRegistry(registry_root)
+    elif create_temp_local:
+        local = LocalRegistry(Path(tempfile.mkdtemp()))
+    else:
+        local = LocalRegistry()
+
+    if not remote_registry_root:
+        return local
+    remote = _make_remote_registry(remote_registry_root)
+    return AggregatedRegistry(local, [remote])
+
+
+def _make_remote_registry(
+    remote_registry_root: str,
+    *,
+    remote_token: str | None = None,
+    remote_cache: str | None = None,
+) -> Any:
+    from graphsmith.registry import FileRemoteRegistry, RemoteRegistryClient
+
+    token = remote_token or os.getenv("GRAPHSMITH_REMOTE_TOKEN")
+    cache_root = remote_cache or os.getenv("GRAPHSMITH_REMOTE_CACHE")
+    if remote_registry_root.startswith(("http://", "https://")):
+        return RemoteRegistryClient(
+            remote_registry_root,
+            auth_token=token,
+            cache_root=cache_root,
+        )
+    return FileRemoteRegistry(remote_registry_root)
 
 
 def _resolve_inputs(
@@ -1543,6 +1444,31 @@ def _resolve_planner_backend_name(
         return "ir"
 
     return "mock"
+
+
+def _make_execution_provider(
+    mock_llm: bool,
+    *,
+    provider: str = "echo",
+    model: str | None = None,
+    base_url: str | None = None,
+) -> Any:
+    """Build an execution-time LLM provider when the CLI requested one."""
+    if mock_llm:
+        from graphsmith.ops.llm_provider import EchoLLMProvider
+        return EchoLLMProvider(prefix="")
+
+    if provider == "echo" and model is None and base_url is None:
+        return None
+
+    from graphsmith.ops.providers import ProviderConfigError, create_provider
+    try:
+        return create_provider(provider, model=model, base_url=base_url)
+    except (ProviderConfigError, ProviderError) as exc:
+        typer.secho(f"FAIL: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+
 def _summarize_plan(glue: Any) -> str:
     """Format a GlueGraph as a human-readable plan summary."""
     lines = []

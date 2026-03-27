@@ -60,26 +60,31 @@ Output port: `filtered`
 The promotion prototype uses a deliberately simple heuristic:
 
 1. Load all stored traces.
-2. Extract the **op-sequence signature** from each trace:
-   the ordered list of `(op,)` tuples from top-level nodes.
-3. Group traces by identical op-sequence signature.
+2. Extract two signatures from each trace:
+   - a flat top-level op-sequence signature
+   - a richer structural signature that includes nested child traces when present
+3. Group traces by identical structural signature.
 4. Any signature appearing >= `min_frequency` times is a
    promotion candidate.
 
-This is a string-level match on the op sequence. It does not
-inspect edge wiring, config, or nested structure. It is
-intentionally honest about its limitations.
+This is still intentionally heuristic. It does not inspect full edge wiring or
+full config equivalence, but it is more informative than the original flat
+op-only grouping.
 
 ## Promotion candidate model
 
 ```
 PromotionCandidate
   signature: str           # e.g. "template.render -> llm.generate"
+  structural_signature: str
   ops: list[str]           # ordered op list
   frequency: int           # how many traces matched
   trace_ids: list[str]     # supporting trace IDs
   inferred_inputs: list[str]  # input port names seen across traces
   inferred_outputs: list[str] # output port names seen across traces
+  suggested_skill_id: str
+  suggested_name: str
+  confidence: float
   notes: str               # limitations / caveats
 ```
 
@@ -88,17 +93,18 @@ PromotionCandidate
 - The exact trace IDs where the pattern appeared.
 - Frequency count.
 - Union of input/output names observed across matching traces.
-- The op sequence itself.
+- The flat op sequence and the richer structural signature.
+- A suggested reusable skill identity for follow-up review.
+- A heuristic confidence score.
 
 ## Explicit limitations
 
-- No graph structure matching — only op sequences.
-- No config comparison — two runs with different templates
-  but the same op sequence are considered the same pattern.
-- No nested skill.invoke inspection.
+- No full graph structure matching.
+- No exact config comparison — two runs with different templates
+  can still collapse together.
 - No automatic publication — candidates are advisory only.
 - No confidence scoring beyond raw frequency.
-- The heuristic is intentionally simple to avoid false sophistication.
+- Suggested skill IDs are heuristics, not authoritative promotion decisions.
 
 ## Human workflow
 

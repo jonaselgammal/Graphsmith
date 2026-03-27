@@ -4,12 +4,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 from typer.testing import CliRunner
 
 from graphsmith.cli.main import app
+from graphsmith.registry import FileRemoteRegistry
 from conftest import EXAMPLE_DIR, minimal_examples, minimal_graph, minimal_skill, write_package
 
 runner = CliRunner()
+
+
+def _mock_http_client_factory(transport: httpx.BaseTransport):
+    original = httpx.Client
+
+    def factory(*args, **kwargs):
+        kwargs.setdefault("transport", transport)
+        return original(*args, **kwargs)
+
+    return factory
 
 
 # ── validate ─────────────────────────────────────────────────────────
@@ -198,6 +210,70 @@ def test_publish_bad_path(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
+def test_remote_publish_http_requires_token(remote_registry_server, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+        ],
+    )
+    assert result.exit_code == 1
+    assert "401" in result.output
+
+
+def test_remote_publish_http_with_token(remote_registry_server, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+            "--remote-token", remote_registry_server["publish_token"],
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Remote published" in result.output
+
+
+def test_remote_publish_http_skip_existing(remote_registry_server, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    first = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+            "--remote-token", remote_registry_server["publish_token"],
+        ],
+    )
+    assert first.exit_code == 0
+    second = runner.invoke(
+        app,
+        [
+            "remote-publish",
+            str(EXAMPLE_DIR / "text.word_count.v1"),
+            "--remote-registry", remote_registry_server["base_url"],
+            "--remote-token", remote_registry_server["publish_token"],
+            "--skip-existing",
+        ],
+    )
+    assert second.exit_code == 0
+    assert "Skipped existing" in second.output
+
+
 # ── search ───────────────────────────────────────────────────────────
 
 
@@ -247,6 +323,51 @@ def test_search_with_filter(tmp_path: Path) -> None:
     assert data[0]["id"] == "text.summarize.v1"
 
 
+def test_search_includes_remote_registry_results(tmp_path: Path) -> None:
+    local_root = tmp_path / "local-reg"
+    remote_root = tmp_path / "remote-reg"
+    FileRemoteRegistry(remote_root).publish(EXAMPLE_DIR / "text.word_count.v1")
+    result = runner.invoke(
+        app,
+        [
+            "search", "count",
+            "--registry", str(local_root),
+            "--remote-registry", str(remote_root),
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["id"] == "text.word_count.v1"
+    assert data[0]["source_kind"] == "remote"
+
+
+def test_search_includes_http_remote_registry_results(
+    tmp_path: Path,
+    remote_registry_server,
+    monkeypatch,
+) -> None:
+    local_root = tmp_path / "local-reg"
+    remote_registry_server["registry"].publish(EXAMPLE_DIR / "text.word_count.v1")
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "search", "count",
+            "--registry", str(local_root),
+            "--remote-registry", remote_registry_server["base_url"],
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data) == 1
+    assert data[0]["id"] == "text.word_count.v1"
+    assert data[0]["source_kind"] == "remote"
+
+
 # ── show ─────────────────────────────────────────────────────────────
 
 
@@ -272,6 +393,49 @@ def test_show_not_found(tmp_path: Path) -> None:
         ["show", "nonexistent", "--version", "1.0.0", "--registry", str(reg_root)],
     )
     assert result.exit_code == 1
+
+
+def test_show_fetches_remote_only_skill(tmp_path: Path) -> None:
+    local_root = tmp_path / "local-reg"
+    remote_root = tmp_path / "remote-reg"
+    FileRemoteRegistry(remote_root).publish(EXAMPLE_DIR / "text.word_count.v1")
+    result = runner.invoke(
+        app,
+        [
+            "show", "text.word_count.v1",
+            "--version", "1.0.0",
+            "--registry", str(local_root),
+            "--remote-registry", str(remote_root),
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["id"] == "text.word_count.v1"
+
+
+def test_show_fetches_http_remote_only_skill(
+    tmp_path: Path,
+    remote_registry_server,
+    monkeypatch,
+) -> None:
+    local_root = tmp_path / "local-reg"
+    remote_registry_server["registry"].publish(EXAMPLE_DIR / "text.word_count.v1")
+    monkeypatch.setattr(
+        "graphsmith.registry.client.httpx.Client",
+        _mock_http_client_factory(remote_registry_server["transport"]),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "show", "text.word_count.v1",
+            "--version", "1.0.0",
+            "--registry", str(local_root),
+            "--remote-registry", remote_registry_server["base_url"],
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["id"] == "text.word_count.v1"
 
 
 # ── plan ─────────────────────────────────────────────────────────────
@@ -477,6 +641,34 @@ def test_promote_candidates_with_data(tmp_path: Path) -> None:
     assert len(data) >= 1
     assert data[0]["signature"] == "template.render"
     assert data[0]["frequency"] >= 2
+    assert data[0]["suggested_skill_id"].startswith("promoted.")
+
+
+def test_promote_candidates_text_shows_example_traces(tmp_path: Path) -> None:
+    trace_root = tmp_path / "traces"
+    write_package(
+        tmp_path / "pkg",
+        skill=minimal_skill(),
+        graph=minimal_graph(),
+        examples=minimal_examples(),
+    )
+    for i in range(2):
+        runner.invoke(
+            app,
+            [
+                "run", str(tmp_path / "pkg"),
+                "--input", f'{{"text":"run{i}"}}',
+                "--trace-root", str(trace_root),
+            ],
+        )
+    result = runner.invoke(
+        app,
+        ["promote-candidates", "--trace-root", str(trace_root)],
+    )
+    assert result.exit_code == 0
+    assert "Suggested skill:" in result.output
+    assert "Inspect examples:" in result.output
+    assert "test.minimal.v1" in result.output
 
 
 def test_promote_candidates_text_shows_example_traces(tmp_path: Path) -> None:

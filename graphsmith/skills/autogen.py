@@ -40,6 +40,10 @@ class SkillSpec(BaseModel):
 # the operation-specific expression, not the full function body.
 
 _TEXT_UNARY_INPUT = [{"name": "text", "type": "string"}]
+_TEXT_BINARY_INPUT = [
+    {"name": "text", "type": "string"},
+    {"name": "value", "type": "string"},
+]
 _MATH_BINARY_INPUT = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
 _MATH_LIST_INPUT = [{"name": "values", "type": "string"}]
 _JSON_INPUT = [{"name": "raw_json", "type": "string"}]
@@ -155,75 +159,73 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
     # ── Text predicates ───────────────────────────────────────────
     "starts_with": {
         "keywords": ["starts with", "begins with", "start with"],
-        "category": "text", "family": "text_config_predicate",
-        "description": "Check if text starts with a prefix.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_predicate",
+        "description": "Check if text starts with a prefix value.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "prefix", "type": "string"}],
         "outputs": [{"name": "result", "type": "string"}],
-        "config": {"prefix": ""},
-        "code_body": 'prefix = config.get("prefix", "")\n    return {"result": str(str(text).startswith(prefix)).lower()}',
+        "code_body": 'prefix = str(inputs.get("prefix", ""))\n    return {"result": str(str(text).startswith(prefix)).lower()}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"result": "true"}},
+            {"input": {"text": "hello world", "prefix": "hello"}, "output": {"result": "true"}},
         ],
     },
     "ends_with": {
         "keywords": ["ends with", "end with"],
-        "category": "text", "family": "text_config_predicate",
-        "description": "Check if text ends with a suffix.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_predicate",
+        "description": "Check if text ends with a suffix value.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "suffix", "type": "string"}],
         "outputs": [{"name": "result", "type": "string"}],
-        "config": {"suffix": ""},
-        "code_body": 'suffix = config.get("suffix", "")\n    return {"result": str(str(text).endswith(suffix)).lower()}',
+        "code_body": 'suffix = str(inputs.get("suffix", ""))\n    return {"result": str(str(text).endswith(suffix)).lower()}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"result": "true"}},
+            {"input": {"text": "hello world", "suffix": "world"}, "output": {"result": "true"}},
         ],
     },
     "contains": {
-        "keywords": ["contains", "includes", "has substring"],
-        "category": "text", "family": "text_config_predicate",
-        "description": "Check if text contains a substring.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "keywords": ["contains", "contain", "includes", "has substring"],
+        "category": "text", "family": "text_binary_predicate",
+        "description": "Check if text contains a substring value.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "substring", "type": "string"}],
         "outputs": [{"name": "result", "type": "string"}],
-        "config": {"substring": ""},
-        "code_body": 'sub = config.get("substring", "")\n    return {"result": str(sub in str(text)).lower()}',
+        "code_body": 'sub = str(inputs.get("substring", ""))\n    return {"result": str(sub in str(text)).lower()}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"result": "true"}},
+            {"input": {"text": "hello world", "substring": "world"}, "output": {"result": "true"}},
         ],
     },
     # ── Text with config ──────────────────────────────────────────
     "replace": {
         "keywords": ["replace", "substitute"],
-        "category": "text", "family": "text_config_transform",
-        "description": "Replace occurrences of a substring.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_transform",
+        "description": "Replace occurrences of one substring with another.",
+        "inputs": [
+            {"name": "text", "type": "string"},
+            {"name": "old", "type": "string"},
+            {"name": "new", "type": "string"},
+        ],
         "outputs": [{"name": "replaced", "type": "string"}],
-        "config": {"old": "", "new": ""},
-        "code_body": 'old = config.get("old", "")\n    new = config.get("new", "")\n    return {"replaced": str(text).replace(old, new)}',
+        "code_body": 'old = str(inputs.get("old", ""))\n    new = str(inputs.get("new", ""))\n    return {"replaced": str(text).replace(old, new)}',
         "examples": [
-            {"input": {"text": "hello world"}, "output": {"replaced": "hello world"}},
+            {"input": {"text": "hello world", "old": "world", "new": "there"}, "output": {"replaced": "hello there"}},
         ],
     },
     "strip_prefix": {
         "keywords": ["strip prefix", "remove prefix", "trim prefix"],
-        "category": "text", "family": "text_config_transform",
-        "description": "Remove a prefix from text if present.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_transform",
+        "description": "Remove a prefix value from text if present.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "prefix", "type": "string"}],
         "outputs": [{"name": "stripped", "type": "string"}],
-        "config": {"prefix": ""},
-        "code_body": 'prefix = config.get("prefix", "")\n    t = str(text)\n    return {"stripped": t[len(prefix):] if t.startswith(prefix) else t}',
+        "code_body": 'prefix = str(inputs.get("prefix", ""))\n    t = str(text)\n    return {"stripped": t[len(prefix):] if t.startswith(prefix) else t}',
         "examples": [
-            {"input": {"text": "prefix_hello"}, "output": {"stripped": "prefix_hello"}},
+            {"input": {"text": "prefix_hello", "prefix": "prefix_"}, "output": {"stripped": "hello"}},
         ],
     },
     "strip_suffix": {
         "keywords": ["strip suffix", "remove suffix", "trim suffix"],
-        "category": "text", "family": "text_config_transform",
-        "description": "Remove a suffix from text if present.",
-        "inputs": _TEXT_UNARY_INPUT,
+        "category": "text", "family": "text_binary_transform",
+        "description": "Remove a suffix value from text if present.",
+        "inputs": [{"name": "text", "type": "string"}, {"name": "suffix", "type": "string"}],
         "outputs": [{"name": "stripped", "type": "string"}],
-        "config": {"suffix": ""},
-        "code_body": 'suffix = config.get("suffix", "")\n    t = str(text)\n    return {"stripped": t[:-len(suffix)] if suffix and t.endswith(suffix) else t}',
+        "code_body": 'suffix = str(inputs.get("suffix", ""))\n    t = str(text)\n    return {"stripped": t[:-len(suffix)] if suffix and t.endswith(suffix) else t}',
         "examples": [
-            {"input": {"text": "hello_suffix"}, "output": {"stripped": "hello_suffix"}},
+            {"input": {"text": "hello_suffix", "suffix": "_suffix"}, "output": {"stripped": "hello"}},
         ],
     },
     # ── Math binary ───────────────────────────────────────────────
@@ -400,25 +402,18 @@ def extract_spec(goal: str) -> SkillSpec:
     Raises AutogenError for out-of-scope or unrecognized requests.
     """
     goal_lower = goal.lower().strip()
+    goal_tokens = re.findall(r"[a-z0-9]+", goal_lower)
 
     # Check out-of-scope phrases
     for phrase in _OUT_OF_SCOPE_PHRASES:
-        if phrase in goal_lower:
+        if _keyword_match_score(goal_lower, goal_tokens, phrase) > 0:
             raise AutogenError(
                 f"Out of scope: '{phrase}' is not supported for automatic skill creation. "
                 f"This prototype supports simple deterministic text/math/JSON ops only."
             )
 
-    # Match against template catalog (longest keyword wins)
-    best_key: str | None = None
-    best_score = 0
-    for key, tmpl in _TEMPLATES.items():
-        for kw in tmpl["keywords"]:
-            if kw in goal_lower:
-                score = len(kw)
-                if score > best_score:
-                    best_key = key
-                    best_score = score
+    matches = match_template_keys(goal)
+    best_key = matches[0] if matches else None
 
     if best_key is None:
         goal_words = set(re.findall(r"[a-z]+", goal_lower))
@@ -436,6 +431,43 @@ def extract_spec(goal: str) -> SkillSpec:
         )
 
     return _spec_from_template(best_key, goal)
+
+
+def match_template_keys(goal: str) -> list[str]:
+    """Return matching template keys ordered from strongest to weakest match."""
+    goal_lower = goal.lower().strip()
+    goal_tokens = re.findall(r"[a-z0-9]+", goal_lower)
+    scored: list[tuple[int, str]] = []
+    for key, tmpl in _TEMPLATES.items():
+        best_score = 0
+        for kw in tmpl["keywords"]:
+            best_score = max(best_score, _keyword_match_score(goal_lower, goal_tokens, kw))
+        if best_score > 0:
+            scored.append((best_score, key))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [key for _, key in scored]
+
+
+def _keyword_match_score(goal_lower: str, goal_tokens: list[str], keyword: str) -> int:
+    """Score a keyword match by substring or ordered-token subsequence.
+
+    The subsequence path catches natural phrasings like "count the characters"
+    for a template keyword such as "count characters".
+    """
+    if keyword in goal_lower:
+        return 1000 + len(keyword)
+
+    keyword_tokens = re.findall(r"[a-z0-9]+", keyword.lower())
+    if not keyword_tokens:
+        return 0
+
+    pos = 0
+    for token in goal_tokens:
+        if token == keyword_tokens[pos]:
+            pos += 1
+            if pos == len(keyword_tokens):
+                return len(keyword)
+    return 0
 
 
 def _spec_from_template(template_key: str, goal: str) -> SkillSpec:
@@ -476,8 +508,8 @@ def generate_op_code(spec: SkillSpec) -> str:
         f'def {func_name}(config: dict, inputs: dict) -> dict:',
         f'    """{spec.description}"""',
     ]
-    if len(input_names) == 1 and input_names[0] == "text":
-        lines.append('    text = inputs.get("text", "")')
+    for input_name in input_names:
+        lines.append(f'    {input_name} = inputs.get("{input_name}", "")')
     lines.append(f'    {code_body}')
 
     return "\n".join(lines)
@@ -549,22 +581,29 @@ def register_generated_op(spec: SkillSpec) -> None:
     input_names = [inp["name"] for inp in spec.inputs]
     func_name = spec.op_name.replace(".", "_")
 
-    if len(input_names) == 1 and input_names[0] == "text":
-        exec_code = (
-            f"def {func_name}(config, inputs):\n"
-            f'    text = inputs.get("text", "")\n'
-            f"    {code_body}\n"
-        )
-    else:
-        exec_code = (
-            f"def {func_name}(config, inputs):\n"
-            f"    {code_body}\n"
-        )
+    binding_lines = "".join(
+        f'    {input_name} = inputs.get("{input_name}", "")\n'
+        for input_name in input_names
+    )
+    exec_code = (
+        f"def {func_name}(config, inputs):\n"
+        f"{binding_lines}"
+        f"    {code_body}\n"
+    )
 
     namespace: dict[str, Any] = {}
     exec(exec_code, namespace)  # noqa: S102 — controlled template code only
     _PURE_OPS[spec.op_name] = namespace[func_name]
     PRIMITIVE_OPS.add(spec.op_name)
+
+
+def unregister_generated_op(spec: SkillSpec) -> None:
+    """Remove a generated op from the in-process runtime registry."""
+    from graphsmith.constants import PRIMITIVE_OPS
+    from graphsmith.ops.registry import _PURE_OPS
+
+    _PURE_OPS.pop(spec.op_name, None)
+    PRIMITIVE_OPS.discard(spec.op_name)
 
 
 # ── Validation + test execution ───────────────────────────────────
@@ -583,40 +622,46 @@ def validate_and_test(spec: SkillSpec, skill_dir: Path) -> dict[str, Any]:
         "failure_stage": "", "passed": False,
     }
 
+    registered = False
     try:
-        register_generated_op(spec)
-    except Exception as exc:
-        result["failure_stage"] = "registration"
-        result["errors"].append(f"Op registration failed: {exc}")
-        return result
-
-    try:
-        pkg = load_skill_package(str(skill_dir))
-        validate_skill_package(pkg)
-        result["validation"] = "PASS"
-    except (ValidationError, Exception) as exc:
-        result["failure_stage"] = "validation"
-        result["errors"].append(f"Validation: {exc}")
-        return result
-
-    result["examples_total"] = len(spec.examples)
-    for i, ex in enumerate(spec.examples):
         try:
-            output = execute_op(spec.op_name, spec.config, ex["input"])
-            if output == ex["output"]:
-                result["examples_passed"] += 1
-            else:
-                result["failure_stage"] = "examples"
-                result["errors"].append(f"Example {i+1}: expected {ex['output']}, got {output}")
+            register_generated_op(spec)
+            registered = True
         except Exception as exc:
-            result["failure_stage"] = "examples"
-            result["errors"].append(f"Example {i+1}: {exc}")
+            result["failure_stage"] = "registration"
+            result["errors"].append(f"Op registration failed: {exc}")
+            return result
 
-    result["passed"] = (
-        result["validation"] == "PASS"
-        and result["examples_passed"] == result["examples_total"]
-    )
-    return result
+        try:
+            pkg = load_skill_package(str(skill_dir))
+            validate_skill_package(pkg)
+            result["validation"] = "PASS"
+        except (ValidationError, Exception) as exc:
+            result["failure_stage"] = "validation"
+            result["errors"].append(f"Validation: {exc}")
+            return result
+
+        result["examples_total"] = len(spec.examples)
+        for i, ex in enumerate(spec.examples):
+            try:
+                output = execute_op(spec.op_name, spec.config, ex["input"])
+                if output == ex["output"]:
+                    result["examples_passed"] += 1
+                else:
+                    result["failure_stage"] = "examples"
+                    result["errors"].append(f"Example {i+1}: expected {ex['output']}, got {output}")
+            except Exception as exc:
+                result["failure_stage"] = "examples"
+                result["errors"].append(f"Example {i+1}: {exc}")
+
+        result["passed"] = (
+            result["validation"] == "PASS"
+            and result["examples_passed"] == result["examples_total"]
+        )
+        return result
+    finally:
+        if registered:
+            unregister_generated_op(spec)
 
 
 def format_result(result: dict[str, Any], skill_dir: Path) -> str:

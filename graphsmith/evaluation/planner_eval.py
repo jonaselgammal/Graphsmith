@@ -18,7 +18,7 @@ from graphsmith.planner.candidates import (
 )
 from graphsmith.planner.composer import glue_to_skill_package
 from graphsmith.planner.models import PlanResult
-from graphsmith.registry.local import LocalRegistry
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.validator import validate_skill_package
 
 
@@ -87,7 +87,7 @@ def load_goals(goals_dir: str | Path) -> list[EvalGoal]:
 
 def evaluate_goal(
     eval_goal: EvalGoal,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: PlannerBackend,
     *,
     retrieval_mode: str = "ranked",
@@ -215,7 +215,7 @@ def evaluate_goal(
 
 def run_evaluation(
     goals: list[EvalGoal],
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: PlannerBackend,
     *,
     provider_name: str = "",
@@ -253,7 +253,7 @@ def run_evaluation(
 
 def compare_retrieval_modes(
     goals: list[EvalGoal],
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: PlannerBackend,
     *,
     provider_name: str = "",

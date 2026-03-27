@@ -1,0 +1,10 @@
+{
+  "id": "s10",
+  "goal": "Normalize this code snippet, and if it looks like JSON pretty print it, otherwise title-case the first line",
+  "tier": 3,
+  "tags": ["programming", "branch", "json", "text"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "semantic_fidelity_blocked", "missing_skill_not_detected"],
+  "notes": "Cross-domain branch between JSON formatting and text formatting."
+}
+

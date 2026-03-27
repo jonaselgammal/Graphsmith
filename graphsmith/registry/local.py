@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,37 +45,42 @@ class LocalRegistry:
         sid = pkg.skill.id
         ver = pkg.skill.version
 
-        # Check for duplicates
-        index = self._load_index()
-        for entry in index:
-            if entry.id == sid and entry.version == ver:
-                raise RegistryError(
-                    f"Skill '{sid}' version '{ver}' is already published"
-                )
+        with self._publish_lock():
+            # Check for duplicates
+            index = self._load_index()
+            for entry in index:
+                if entry.id == sid and entry.version == ver:
+                    raise RegistryError(
+                        f"Skill '{sid}' version '{ver}' is already published"
+                    )
 
-        # Copy files
-        dest = self._skills_dir / sid / ver
-        dest.mkdir(parents=True, exist_ok=True)
-        src = Path(pkg.root_path)
-        for name in ("skill.yaml", "graph.yaml", "examples.yaml"):
-            shutil.copy2(src / name, dest / name)
+            # Copy files
+            dest = self._skills_dir / sid / ver
+            dest.mkdir(parents=True, exist_ok=True)
+            src = Path(pkg.root_path)
+            for name in ("skill.yaml", "graph.yaml", "examples.yaml"):
+                shutil.copy2(src / name, dest / name)
 
-        # Build index entry
-        entry = IndexEntry(
-            id=sid,
-            name=pkg.skill.name,
-            version=ver,
-            description=pkg.skill.description,
-            tags=list(pkg.skill.tags),
-            effects=list(pkg.skill.effects),
-            input_names=[f.name for f in pkg.skill.inputs],
-            required_input_names=[f.name for f in pkg.skill.inputs if f.required],
-            optional_input_names=[f.name for f in pkg.skill.inputs if not f.required],
-            output_names=[f.name for f in pkg.skill.outputs],
-            published_at=datetime.now(timezone.utc).isoformat(),
-        )
-        index.append(entry)
-        self._save_index(index)
+            # Build index entry
+            entry = IndexEntry(
+                id=sid,
+                name=pkg.skill.name,
+                version=ver,
+                description=pkg.skill.description,
+                tags=list(pkg.skill.tags),
+                effects=list(pkg.skill.effects),
+                input_names=[f.name for f in pkg.skill.inputs],
+                required_input_names=[f.name for f in pkg.skill.inputs if f.required],
+                optional_input_names=[f.name for f in pkg.skill.inputs if not f.required],
+                output_names=[f.name for f in pkg.skill.outputs],
+                published_at=datetime.now(timezone.utc).isoformat(),
+                source_kind="local",
+                registry_id=str(self._root),
+                registry_url=f"file://{self._root}",
+                manifest_version="1",
+            )
+            index.append(entry)
+            self._save_index(index)
 
         # Check dependencies (advisory only)
         warnings = self._check_dependencies(pkg, index)
@@ -161,3 +167,21 @@ class LocalRegistry:
         self._index_path.write_text(
             json.dumps(data, indent=2) + "\n", encoding="utf-8"
         )
+
+    @contextmanager
+    def _publish_lock(self) -> Any:
+        """Serialize registry publishes across CLI processes."""
+        self._root.mkdir(parents=True, exist_ok=True)
+        lock_path = self._root / ".publish.lock"
+        with lock_path.open("a+", encoding="utf-8") as lock_file:
+            try:
+                import fcntl
+            except ImportError:  # pragma: no cover - Windows fallback
+                fcntl = None
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)

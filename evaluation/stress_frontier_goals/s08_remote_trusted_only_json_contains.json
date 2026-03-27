@@ -1,0 +1,10 @@
+{
+  "id": "s08",
+  "goal": "Using only trusted published skills, parse this JSON, extract the value field, and check whether it contains a phrase",
+  "tier": 3,
+  "tags": ["remote", "policy", "trusted_only"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["semantic_fidelity_blocked", "replan_failed", "missing_skill_not_detected"],
+  "notes": "Trust-constrained remote reuse."
+}
+

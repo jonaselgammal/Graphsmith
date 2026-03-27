@@ -1,94 +1,127 @@
 # Graphsmith
 
-**Semantic planner + compiler for graph-based AI workflows.**
+**AI-native planning and execution for graph-based programs.**
 
-Graphsmith composes typed, executable skill graphs from natural language goals.
-An LLM plans *what* to do; Graphsmith deterministically compiles *how* to wire it.
+Graphsmith turns natural language goals into typed executable graphs. An LLM
+plans semantic intent; Graphsmith compiles, validates, repairs, executes, and
+learns reusable skills from the result.
 
-Claude Haiku: **36/36 (100%)** on benchmark + holdout + challenge.
-Llama 3.1 8B: **~86-94%** with reranking + decomposition.
+It is no longer just a text-pipeline planner. The current architecture supports
+typed IR planning, guarded execution, bounded loop lowering, local structural
+repair, closed-loop skill generation, skill promotion, and both local and
+remote skill registries.
 
-No public servers. Everything runs locally.
-
-## How it works
+## Core idea
 
 ```mermaid
-flowchart TD
-    Goal["Natural Language Goal"] --> Decompose
-
-    subgraph LLM ["LLM (semantic reasoning)"]
-        Decompose["Semantic<br/>Decomposition"] --> Generate["IR Candidate<br/>Generation (×N)"]
-    end
-
-    Generate --> Score
-
-    subgraph GS ["Graphsmith (deterministic)"]
-        Score["Scoring +<br/>Reranking"] --> Compile["Deterministic<br/>Compiler"]
-        Compile --> Validate["Validation<br/>(types · DAG · bindings)"]
-    end
-
-    Validate --> Graph["Validated<br/>Executable Graph"]
-
-    style LLM fill:#eef2ff,stroke:#818cf8
-    style GS fill:#fefce8,stroke:#eab308
-    style Goal fill:#f0fdf4,stroke:#22c55e
-    style Graph fill:#f0fdf4,stroke:#22c55e
+flowchart LR
+    A["Goal"] --> B["Goal Policy + Deterministic Decomposition"]
+    B --> C["Candidate Retrieval<br/>(Local + Remote Registry)"]
+    C --> D["LLM IR Candidates"]
+    D --> E["Deterministic Ranking + Selection"]
+    E --> F["IR Compile + Normalize"]
+    F --> G["Validate + Repair"]
+    G --> H["Execute Graph"]
+    H --> I["Trace + Outputs"]
+    I --> J["Promotion Signals"]
+    I --> K["Runtime / Region Repair"]
+    K --> F
+    I --> L["Closed-Loop Skill Generation"]
+    L --> C
 ```
 
-1. **Decomposition** — LLM classifies the goal into content transforms + presentation intent
-2. **IR generation** — LLM produces N candidate plans as semantic IR (steps, data flow, config)
-3. **Scoring** — deterministic semantic scorer ranks candidates
-4. **Compilation** — compiler lowers IR to executable graph (edges, node IDs, outputs)
-5. **Validation** — structural checks (types, DAG, bindings) before execution
+The LLM does not emit raw graph edges as the primary interface. It proposes
+semantic structure in IR, and Graphsmith handles graph mechanics,
+normalization, validation, and bounded repair deterministically.
 
-The LLM never serializes raw graph structures. It only describes semantic intent.
-The compiler handles all graph mechanics deterministically.
+## What Graphsmith does now
 
-## Current capabilities
+1. **Plans in a typed IR**
+   Goals become structured plans with steps, bindings, loop blocks, and
+   guarded execution hints.
+2. **Compiles deterministically**
+   IR is lowered into executable graphs with explicit nodes, edges, outputs,
+   and validation.
+3. **Repairs locally**
+   Graphsmith can normalize bad outputs, patch certain local contract issues,
+   and regenerate failing regions instead of always replanning everything.
+4. **Executes and traces**
+   The runtime records node-level traces, skipped branches, loop iterations,
+   and failures for inspection and repair.
+5. **Generates missing skills**
+   For bounded capability gaps, Graphsmith can generate, validate, publish, and
+   reuse a new skill inside the same planning loop.
+6. **Promotes useful structure**
+   Repeated trace patterns can be surfaced as promotion candidates for reuse.
+7. **Uses local and remote registries**
+   Skills can be published locally or fetched from a hosted remote registry
+   with provenance metadata.
 
-- **Text pipelines**: normalize, summarize, extract keywords, title case, word count, sentiment
-- **JSON extraction**: reshape, extract field
-- **Formatting**: join lines (lists), template rendering (headers), prefix lines
-- **Multi-step workflows**: chains, fan-out, multi-output goals
-- **15 skills**, 36 evaluation goals across 3 test sets
+## Current capability envelope
+
+- Deterministic and LLM-backed text/JSON pipelines
+- Structural branches with guarded execution
+- Bounded loop lowering and execution
+- Closed-loop single-skill generation with repair-aware re-entry
+- Local subgraph regeneration and runtime-trace-guided region repair
+- Promotion mining from traces
+- Local registry, file-backed remote mock, and hosted HTTP remote registry
+- Frontier and stress harnesses for probing generalization boundaries
+
+What it is **not** yet:
+
+- a general programming language runtime
+- a general code-editing agent by default
+- a system that can yet synthesize arbitrary multi-region programs reliably
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/jonaselgammal/Graphsmith.git
-cd Graphsmith
-
-# Install (creates .venv, installs deps, sets up .env)
-./scripts/install.sh
-
-# Activate and verify
-source .venv/bin/activate
-graphsmith doctor
-
-# Add your API key to .env, then:
-graphsmith run-interactive
-```
-
-### Manual install
-
-```bash
+# Install
 pip install -e ".[dev]"
+
+# Create a .env file with API keys (gitignored)
 cp .env.example .env
-# Edit .env: GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
+
+# Publish example skills to a local registry
+REG=$(mktemp -d)
+for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG"; done
+
+# Plan
+graphsmith plan "normalize text and count words" \
+  --registry "$REG" \
+  --backend ir \
+  --provider anthropic \
+  --model claude-haiku-4-5-20251001
+
+# Closed-loop solve
+graphsmith solve "compute the median of numbers" --auto-approve
 ```
 
-### Run evaluation
+## Hosted remote registry
+
+Graphsmith now also supports a hosted remote registry flow.
 
 ```bash
-REG=$(mktemp -d)
-for d in examples/skills/*/; do graphsmith publish "$d" --registry "$REG" 2>/dev/null; done
+# Search remote skills
+graphsmith search count \
+  --remote-registry https://graphsmith-remote-registry.graphsmith.workers.dev
 
-graphsmith eval-planner --goals evaluation/goals --registry "$REG" \
-  --backend ir --ir-candidates 3 --decompose \
-  --provider anthropic --model claude-haiku-4-5-20251001 --delay 2
+# Publish to a remote registry
+export GRAPHSMITH_REMOTE_TOKEN=...
+graphsmith remote-publish examples/skills/text.word_count.v1 \
+  --remote-registry https://graphsmith-remote-registry.graphsmith.workers.dev
 ```
 
-## Recommended configuration
+The current remote setup is still an early foundation:
+- immutable packages
+- search/fetch/publish
+- local cache
+- provenance metadata
+
+Trust-aware ranking, moderation, and richer quality policy are still future work.
+
+## Recommended planner configuration
 
 ```bash
 graphsmith eval-planner \
@@ -103,197 +136,124 @@ graphsmith eval-planner \
 
 | Flag | Purpose |
 |------|---------|
-| `--backend ir` | Use IR pipeline (LLM → IR → compile), not raw graph emission |
-| `--ir-candidates 3` | Generate 3 candidates, pick best via semantic scoring |
-| `--decompose` | Add decomposition stage for semantic grounding |
-| `--provider anthropic` | Use Anthropic API |
-| `--model claude-haiku-4-5-20251001` | Fast, capable model |
-
-## Performance
-
-| Set | Goals | Claude Haiku | Llama 3.1 8B |
-|-----|-------|-------------|--------------|
-| Benchmark | 9 | 9/9 (100%) | 8-9/9 |
-| Holdout | 15 | 15/15 (100%) | 12-14/15 |
-| Challenge | 12 | 12/12 (100%) | 10-12/12 |
-| **Total** | **36** | **36/36 (100%)** | **~31-34/36 (86-94%)** |
-
-Stability on Llama 3.1 8B (3 runs): 28/36 goals always pass, 0 always fail,
-8 intermittent (output naming noise).
-
-## Interactive mode
-
-```bash
-graphsmith run-interactive
-```
-
-Plan workflows interactively. Type a goal, inspect candidates, compare alternatives:
-
-```
-  Graphsmith Interactive
-  Provider: anthropic | Model: claude-haiku-4-5-20251001
-  Backend: IR (3 candidates, decomposition: on)
-  Type :help for commands
-
-  > extract keywords from this text
-
-  Planning...
-
-  Plan Summary
-  ----------------------------------------
-  Steps:
-    1. extract (text.extract_keywords.v1)
-  Outputs:
-    - keywords <- extract.keywords
-  Effects: llm_inference
-
-  (3 candidates compiled, :candidates to inspect, :compare to diff)
-
-  > :candidates
-
-  Candidate 1: ✔ SELECTED
-    steps: extract
-    outputs: keywords
-    score: 115
-
-  Candidate 2:
-    steps: extract → format
-    outputs: joined
-    score: 80
-
-  > :compare
-
-  Selected (Candidate 1)
-    steps: extract
-    score: 115
-
-  Alternative (Candidate 2)
-    steps: extract → format
-    score: 80
-
-  Differences:
-    alternative has: text.join_lines.v1
-    score delta: +35
-```
-
-Commands: `:help`, `:candidates`, `:compare`, `:decomposition`, `:rerun`, `:history`, `:quit`.
+| `--backend ir` | Use IR planning and deterministic compilation |
+| `--ir-candidates 3` | Generate multiple candidates and rerank them |
+| `--decompose` | Add deterministic semantic decomposition |
+| `--provider ...` | Use a live provider for planning |
+| `--registry` / `--remote-registry` | Search local and/or remote skills |
 
 ## Project structure
 
-```
+```text
 graphsmith/
-  planner/          IR pipeline: decomposition, prompt, parser, compiler, scorer
-  models/           Pydantic models (SkillGraph, GlueGraph, GraphBody)
-  validator/        Deterministic validation (types, DAG, bindings)
-  runtime/          Topological executor + value store
-  ops/              Primitive ops + LLM providers (Anthropic, OpenAI-compatible)
-  registry/         Local skill registry (publish, search, fetch)
-  evaluation/       Eval harness, stability analysis, candidate dataset
-  cli/              Typer CLI (20+ commands)
-  traces/           Execution trace persistence + promotion mining
-examples/skills/    21 skill packages (text, math, JSON)
-evaluation/         36 eval goals (benchmark + holdout + challenge)
-scripts/            Eval runners, analysis tools, data collection
-tests/              922 tests
-docs/               Architecture and sprint documentation
+  planner/          IR planning, decomposition, compiler, repair, policy
+  models/           Pydantic graph / package / planner models
+  validator/        Deterministic graph + package validation
+  runtime/          Execution engine, guards, loops, traces
+  ops/              Primitive ops and provider-backed execution
+  registry/         Local, aggregate, file-backed remote, HTTP client
+  skills/           Closed-loop skill generation and autogen templates
+  traces/           Trace storage and promotion mining
+  evaluation/       Frontier, stress, and planner evaluation harnesses
+  cli/              Typer CLI
+examples/skills/    Example reusable skill packages
+evaluation/         Goal suites for planner, frontier, and stress testing
+docs/               Architecture notes and sprint docs
+tests/              Automated regression coverage
+cloudflare/         Hosted remote registry worker scaffold
 ```
 
-## CLI commands
+## Important CLI commands
 
 | Command | Description |
 |---------|-------------|
-| `eval-planner` | Evaluate planner quality against goal sets |
 | `plan` | Generate a plan from a natural language goal |
-| `plan-and-run` | Plan + execute in one step |
+| `plan-and-run` | Plan and execute in one step |
 | `run-plan` | Run a saved plan |
-| `run` | Run a skill package directly |
-| `publish` | Publish a skill to the local registry |
-| `search` | Search published skills |
-| `validate` | Validate a skill package |
-| `create-skill` | Generate a new skill scaffold |
-| `solve` | Plan with closed-loop missing-skill generation |
-| `doctor` | Check system readiness |
-| `ui` | Launch local plan inspector (browser) |
-| `version` | Print version |
+| `solve` | Run the bounded closed-loop generation path |
+| `publish` | Publish a skill to a local registry |
+| `remote-publish` | Publish a skill to a remote registry |
+| `search` / `show` | Search or inspect local/remote skills |
+| `eval-planner` | Planner evaluation on goal sets |
+| `eval-frontier` | Structural frontier evaluation |
+| `eval-stress-frontier` | Isolated vs cumulative stress runs |
+| `promote-candidates` | Surface promotion opportunities from traces |
 
 Run `graphsmith --help` for the full list.
 
-## Skills
-
-Graphsmith includes 21 built-in skills across text, math, and JSON categories.
-
-Create new skills with:
-```bash
-graphsmith create-skill my_domain.my_op.v1
-```
-
-This generates a complete scaffold (skill.yaml, graph.yaml, examples.yaml).
-
-Or auto-generate a complete skill from a description:
-```bash
-graphsmith create-skill-from-goal "uppercase text"
-# → generates implementation + validates + runs tests
-```
-
-See [docs/SKILLS.md](docs/SKILLS.md) for the full guide and
-[docs/AUTO_SKILL_CREATION.md](docs/AUTO_SKILL_CREATION.md) for auto-generation.
-
-## LLM providers
+## Providers
 
 ```bash
-# Anthropic (recommended)
+# Anthropic
 export GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
 
 # Groq / OpenAI-compatible
 export GRAPHSMITH_GROQ_API_KEY=gsk_...
-graphsmith eval-planner --provider openai --model llama-3.1-8b-instant \
+graphsmith eval-frontier \
+  --provider openai \
+  --model llama-3.1-8b-instant \
   --base-url https://api.groq.com/openai/v1
 ```
 
-Or create a `.env` file (gitignored):
-```
+Or create a `.env` file:
+
+```text
 GRAPHSMITH_ANTHROPIC_API_KEY=sk-ant-...
 GRAPHSMITH_GROQ_API_KEY=gsk_...
+GRAPHSMITH_REMOTE_TOKEN=...
 ```
 
 ## Testing
 
 ```bash
-pytest              # 970 tests, no network required
-pytest -v           # verbose
-pytest -x           # stop on first failure
+pytest
+pytest -v
+pytest -x
 ```
 
-## Status and roadmap
+For live runs, use the evaluation harnesses:
 
-**v1 (current)**: architecture stable, 36/36 on Claude Haiku.
-
-| Component | Status |
-|-----------|--------|
-| IR compiler | Stable |
-| Deterministic scorer | Stable |
-| Decomposition | Stable |
-| Candidate reranking | Stable |
-| Stability measurement | Complete |
-| Candidate dataset pipeline | Complete |
-| Learned reranker | Prototype (no headroom on Claude) |
-
-**Next steps**:
-- Weak-model optimization (Llama 3.1 8B)
-- Learned reranker (when Llama data shows headroom)
-- Broader skill/goal coverage
+```bash
+graphsmith eval-frontier --goals evaluation/frontier_goals --registry "$REG" ...
+graphsmith eval-stress-frontier --goals evaluation/stress_frontier_goals --registry "$REG" ...
+```
 
 ## Documentation
 
-- **[Full Documentation](docs/index.md)** — getting started, CLI, skills, architecture
-- [Getting Started](docs/getting_started.md) — install and first run
-- [CLI Reference](docs/cli.md) — all commands and flags
-- [Skills Guide](docs/SKILLS.md) — built-in skills and how to create new ones
-- [Architecture](docs/architecture.md) — how the system works
-- [Examples](docs/examples.md) — end-to-end usage patterns
-- [Evaluation](docs/evaluation.md) — running benchmarks
-- [Debugging](docs/debugging.md) — inspecting failures
-- [Changelog](CHANGELOG.md) — version history
+- [IR architecture](docs/PLANNING_IR_ARCHITECTURE.md)
+- [Closed-loop generation](docs/CLOSED_LOOP_SKILL_GENERATION.md)
+- [Remote registry foundation](docs/REMOTE_SKILL_REGISTRY_FOUNDATION.md)
+- [Remote registry v1 design](docs/REMOTE_SKILL_REGISTRY_V1_DESIGN.md)
+- [Cloudflare remote registry](docs/CLOUDFLARE_REMOTE_REGISTRY.md)
+- [Running evals](docs/RUNNING_EVALS.md)
+- [Debugging and traces](docs/DEBUGGING_AND_TRACES.md)
+- [Why Graphsmith](docs/WHY_GRAPHSMITH.md)
+- [Changelog](CHANGELOG.md)
+
+## Roadmap summary
+
+Graphsmith now has a strong programmable planning substrate, but true
+general-purpose coding still requires a few major leaps:
+
+1. **Graph-native skill synthesis**
+   Generated skills need to become small subgraphs with contracts and tests,
+   not mostly single-step templates.
+2. **Region-level repair**
+   Failing loops, branches, and subplans need local regeneration as a normal
+   workflow, not an edge case.
+3. **Richer runtime semantics**
+   More explicit bindings, structured errors, state/effects, and reusable
+   subgraphs are needed to move from workflows toward real programs.
+4. **Tool and code environment integration**
+   Files, tests, shell commands, APIs, and code edits need to become first-class
+   skill environments so Graphsmith can tackle real software tasks.
+5. **Trust-aware skill reuse**
+   Remote skill reuse should eventually depend on provenance, validation
+   history, and policy, not just retrieval.
+
+The short version: Graphsmith is already a serious experimental substrate for
+AI-native program planning, but the next phase is about generalized synthesis
+and repair rather than adding more domain-specific tricks.
 
 ## License
 

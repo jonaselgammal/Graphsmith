@@ -12,6 +12,7 @@ from graphsmith.ops.llm import llm_extract, llm_generate
 from graphsmith.ops.llm_provider import EchoLLMProvider
 from graphsmith.ops.select import select_fields
 from graphsmith.ops.template import template_render
+from graphsmith.ops.text_ops import text_equals
 
 
 # ── template.render ──────────────────────────────────────────────────
@@ -166,6 +167,14 @@ class TestFallbackTry:
     def test_primary_missing(self) -> None:
         result = fallback_try({}, {"fallback": "B"})
         assert result == {"result": "B"}
+
+
+class TestTextEquals:
+    def test_equal(self) -> None:
+        assert text_equals({}, {"text": "positive", "other": "positive"}) == {"result": True}
+
+    def test_not_equal(self) -> None:
+        assert text_equals({}, {"text": "negative", "other": "positive"}) == {"result": False}
 
 
 # ── llm.generate ─────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ from graphsmith.skills.autogen import (
     format_result,
     generate_op_code,
     generate_skill_files,
+    match_template_keys,
     register_generated_op,
     run_generation_suite,
     validate_and_test,
@@ -28,11 +29,13 @@ class TestExtractSpec:
         ("convert to lowercase", "lowercase"),
         ("trim whitespace", "trim"),
         ("count characters", "char_count"),
+        ("count the characters", "char_count"),
         ("count lines in text", "line_count"),
         ("join lines together", "join"),
         ("check if text starts with prefix", "starts_with"),
         ("check ends with suffix", "ends_with"),
         ("check if text contains word", "contains"),
+        ("check whether keywords contain a phrase", "contains"),
         ("replace substring", "replace"),
         ("strip prefix from text", "strip_prefix"),
         ("remove suffix", "strip_suffix"),
@@ -45,6 +48,7 @@ class TestExtractSpec:
         ("check if json has key", "has_key"),
         ("list json keys", "keys"),
         ("pretty print json", "pretty"),
+        ("pretty print this json", "pretty"),
     ])
     def test_template_matching(self, goal: str, expected_key: str) -> None:
         spec = extract_spec(goal)
@@ -53,6 +57,11 @@ class TestExtractSpec:
     def test_spec_has_family(self) -> None:
         spec = extract_spec("uppercase text")
         assert spec.family == "text_unary"
+
+    def test_match_template_keys_orders_multiple_matches(self) -> None:
+        keys = match_template_keys("text starts with a prefix and ends with a suffix")
+        assert "starts_with" in keys
+        assert "ends_with" in keys
 
     def test_unrecognized_raises(self) -> None:
         with pytest.raises(AutogenError, match="Could not match"):
@@ -87,6 +96,11 @@ class TestGenerateCode:
         code = generate_op_code(extract_spec("json has key"))
         assert "def json_has_key" in code
 
+    def test_contains_uses_input_not_config(self) -> None:
+        code = generate_op_code(extract_spec("contains substring"))
+        assert 'inputs.get("substring"' in code
+        assert 'config.get("substring"' not in code
+
 
 # ── File generation ───────────────────────────────────────────────
 
@@ -111,6 +125,12 @@ class TestGenerateFiles:
             path = generate_skill_files(extract_spec("minimum"), tmpdir)
             content = (path / "graph.yaml").read_text()
             assert "op: math.min" in content
+
+    def test_contains_skill_has_substring_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = generate_skill_files(extract_spec("contains substring"), tmpdir)
+            content = (path / "skill.yaml").read_text()
+            assert "name: substring" in content
 
 
 # ── Validation + testing (all templates) ──────────────────────────

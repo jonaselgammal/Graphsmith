@@ -1,0 +1,11 @@
+{
+  "id": "s06",
+  "goal": "Take these lines of pseudo-code, normalize them, sort them, remove duplicates, and join them into a readable block",
+  "tier": 2,
+  "tags": ["programming", "text", "multi_stage"],
+  "expected_success": true,
+  "required_skill_ids": ["text.normalize.v1", "text.sort_lines.v1", "text.remove_duplicates.v1", "text.join_lines.v1"],
+  "min_node_count": 4,
+  "notes": "Programming-adjacent deterministic pipeline using only existing skills."
+}
+

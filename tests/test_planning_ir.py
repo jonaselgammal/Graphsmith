@@ -24,6 +24,7 @@ from graphsmith.planner.composer import glue_to_skill_package
 from graphsmith.planner.ir import IRBinding, IRBlock, IRInput, IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.ir_parser import IRParseError, parse_ir_output
 from graphsmith.planner.ir_prompt import build_ir_planning_context, get_ir_system_message
+from graphsmith.planner.repair import normalize_ir_contracts, repair_ir_locally
 from graphsmith.planner.models import PlanRequest
 from graphsmith.validator import validate_skill_package
 
@@ -304,6 +305,85 @@ class TestCompilerHappyPath:
         glue = compile_ir(ir)
         assert glue.graph.nodes[0].when == "!input.skip"
 
+    def test_loop_block_lowers_to_parallel_map(self) -> None:
+        ir = PlanningIR(
+            goal="normalize lines",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="normalize_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[
+                        IRStep(
+                            name="normalize",
+                            skill_id="text.normalize.v1",
+                            sources={"text": IRSource(step="input", port="text")},
+                        )
+                    ],
+                    final_outputs={"normalized": IROutputRef(step="normalize", port="normalized")},
+                    max_items=10,
+                )
+            ],
+            final_outputs={"normalized": IROutputRef(step="normalize_each", port="normalized")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        assert len(glue.graph.nodes) == 1
+        node = glue.graph.nodes[0]
+        assert node.op == "parallel.map"
+        assert node.config["mode"] == "inline_graph"
+        assert node.config["max_items"] == 10
+        assert node.config["item_inputs"] == ["text"]
+        assert glue.graph.outputs["normalized"] == "normalize_each.normalized"
+
+    def test_branch_block_lowers_to_guarded_steps_and_merge(self) -> None:
+        ir = PlanningIR(
+            goal="conditionally format",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_branch",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[
+                        IRStep(
+                            name="then_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "then:{{text}}"},
+                        )
+                    ],
+                    else_steps=[
+                        IRStep(
+                            name="else_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "else:{{text}}"},
+                        )
+                    ],
+                    then_outputs={"rendered": IROutputRef(step="then_render", port="rendered")},
+                    else_outputs={"rendered": IROutputRef(step="else_render", port="rendered")},
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_branch", port="rendered")},
+            effects=["pure"],
+        )
+        glue = compile_ir(ir)
+        ids = [node.id for node in glue.graph.nodes]
+        assert "format_branch_then_then_render" in ids
+        assert "format_branch_else_else_render" in ids
+        assert "format_branch_merge_rendered" in ids
+        node_map = {node.id: node for node in glue.graph.nodes}
+        assert node_map["format_branch_then_then_render"].when == "input.enabled"
+        assert node_map["format_branch_else_else_render"].when == "!input.enabled"
+        assert node_map["format_branch_merge_rendered"].op == "fallback.try"
+        assert glue.graph.outputs["rendered"] == "format_branch_merge_rendered.result"
+
 
 # ── Compiler error tests ───────────────────────────────────────────
 
@@ -458,16 +538,59 @@ class TestCompilerErrors:
             ],
             blocks=[
                 IRBlock(
-                    name="conditional",
-                    kind="branch",
-                    steps=[
-                        IRStep(name="inside", skill_id="text.summarize.v1"),
-                    ],
+                    name="local_fn",
+                    kind="function",
                 )
             ],
             final_outputs={"x": IROutputRef(step="call", port="normalized")},
         )
-        with pytest.raises(UnsupportedControlFlowError, match="branch"):
+        with pytest.raises(UnsupportedControlFlowError, match="function"):
+            compile_ir(ir)
+
+    def test_loop_block_requires_collection(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="loop_it",
+                    kind="loop",
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[IRStep(name="normalize", skill_id="text.normalize.v1",
+                                  sources={"text": IRSource(step="input", port="text")})],
+                    final_outputs={"normalized": IROutputRef(step="normalize", port="normalized")},
+                )
+            ],
+            final_outputs={"normalized": IROutputRef(step="loop_it", port="normalized")},
+        )
+        with pytest.raises(CompilerError, match="missing collection source"):
+            compile_ir(ir)
+
+    def test_branch_block_requires_matching_outputs(self) -> None:
+        ir = PlanningIR(
+            goal="test",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="b",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[IRStep(name="t", skill_id="template.render",
+                                       sources={"text": IRSource(step="input", port="text")},
+                                       config={"template": "{{text}}"})],
+                    else_steps=[IRStep(name="e", skill_id="template.render",
+                                       sources={"text": IRSource(step="input", port="text")},
+                                       config={"template": "{{text}}"})],
+                    then_outputs={"rendered": IROutputRef(step="t", port="rendered")},
+                    else_outputs={"other": IROutputRef(step="e", port="rendered")},
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="b", port="rendered")},
+        )
+        with pytest.raises(CompilerError, match="identical keys"):
             compile_ir(ir)
 
     def test_compiler_error_has_phase(self) -> None:
@@ -563,6 +686,7 @@ class TestIRParser:
                 {
                     "name": "loop_block",
                     "kind": "loop",
+                    "collection": "input.text",
                     "steps": [
                         {"name": "inner", "skill_id": "text.normalize.v1", "sources": {"text": "input.text"}}
                     ],
@@ -573,7 +697,35 @@ class TestIRParser:
         }
         ir = parse_ir_output(json.dumps(data), goal="test")
         assert ir.blocks[0].kind == "loop"
+        assert ir.blocks[0].collection is not None
         assert ir.blocks[0].final_outputs["normalized"].step == "inner"
+
+    def test_parse_branch_block(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}, {"name": "enabled", "type": "boolean"}],
+            "steps": [],
+            "blocks": [
+                {
+                    "name": "format_branch",
+                    "kind": "branch",
+                    "condition": "input.enabled",
+                    "inputs": {"text": "input.text"},
+                    "then_steps": [
+                        {"name": "t", "skill_id": "template.render", "sources": {"text": "input.text"}, "config": {"template": "then:{{text}}"}}
+                    ],
+                    "else_steps": [
+                        {"name": "e", "skill_id": "template.render", "sources": {"text": "input.text"}, "config": {"template": "else:{{text}}"}}
+                    ],
+                    "then_outputs": {"rendered": "t.rendered"},
+                    "else_outputs": {"rendered": "e.rendered"},
+                }
+            ],
+            "final_outputs": {"rendered": {"step": "format_branch", "port": "rendered"}},
+        }
+        ir = parse_ir_output(json.dumps(data), goal="test")
+        assert ir.blocks[0].kind == "branch"
+        assert ir.blocks[0].condition is not None
+        assert ir.blocks[0].then_outputs["rendered"].step == "t"
 
     def test_parse_when_and_unless(self) -> None:
         data = {
@@ -594,6 +746,21 @@ class TestIRParser:
         assert ir.steps[0].when.step == "input"
         assert ir.steps[0].when.port == "enabled"
         assert ir.steps[0].unless is True
+
+    def test_invalid_step_sources_type_raises_parse_error(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}],
+            "steps": [
+                {
+                    "name": "call",
+                    "skill_id": "text.summarize.v1",
+                    "sources": [],
+                }
+            ],
+            "final_outputs": {"summary": {"step": "call", "port": "summary"}},
+        }
+        with pytest.raises(IRParseError, match="step.sources must be an object"):
+            parse_ir_output(json.dumps(data), goal="test")
 
     def test_roundtrip_parse_compile(self) -> None:
         """Parse IR from JSON, compile to GlueGraph, validate."""
@@ -746,3 +913,417 @@ class TestIRBackend:
 
         assert result.status == "failure"
         assert any("provider" in h.node_id for h in result.holes)
+
+    def test_backend_repairs_branch_outputs_from_parent_references(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        ir_json = json.dumps({
+            "inputs": [{"name": "text", "type": "string"}, {"name": "enabled", "type": "boolean"}],
+            "steps": [],
+            "blocks": [
+                {
+                    "name": "format_branch",
+                    "kind": "branch",
+                    "condition": {"step": "input", "port": "enabled"},
+                    "inputs": {"text": {"step": "input", "port": "text"}},
+                    "then_steps": [
+                        {
+                            "name": "then_render",
+                            "skill_id": "template.render",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                            "config": {"template": "then:{{text}}"},
+                        }
+                    ],
+                    "else_steps": [
+                        {
+                            "name": "else_render",
+                            "skill_id": "template.render",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                            "config": {"template": "else:{{text}}"},
+                        }
+                    ],
+                }
+            ],
+            "final_outputs": {"rendered": {"step": "format_branch", "port": "rendered"}},
+            "effects": ["pure"],
+        })
+
+        class FixedProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                return ir_json
+
+        backend = IRPlannerBackend(FixedProvider())  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="conditionally format", candidates=[]))
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert result.repair_actions
+        assert any("branch:format_branch:then" in action for action in result.repair_actions)
+        assert any("branch:format_branch:else" in action for action in result.repair_actions)
+        assert result.graph.graph.outputs["rendered"] == "format_branch_merge_rendered.result"
+
+    def test_backend_repairs_loop_contract_locally(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        ir_json = json.dumps({
+            "inputs": [{"name": "items", "type": "array<string>"}],
+            "steps": [],
+            "blocks": [
+                {
+                    "name": "normalize_each",
+                    "kind": "loop",
+                    "collection": {"step": "input", "port": "items"},
+                    "inputs": {"text": {"step": "input", "port": "items"}},
+                    "steps": [
+                        {
+                            "name": "normalize",
+                            "skill_id": "text.normalize.v1",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                        }
+                    ],
+                }
+            ],
+            "final_outputs": {"normalized": {"step": "normalize_each", "port": "normalized"}},
+            "effects": ["pure"],
+        })
+
+        class FixedProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                return ir_json
+
+        backend = IRPlannerBackend(FixedProvider())  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="normalize lines", candidates=[]))
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert len(result.repair_actions) == 2
+        node = result.graph.graph.nodes[0]
+        assert node.op == "parallel.map"
+        assert node.config["item_inputs"] == ["text"]
+
+    def test_backend_regenerates_invalid_loop_block_locally(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        first_ir = json.dumps({
+            "inputs": [{"name": "items", "type": "array<string>"}],
+            "steps": [
+                {
+                    "name": "prepare",
+                    "skill_id": "identity",
+                    "sources": {"value": {"step": "input", "port": "items"}},
+                }
+            ],
+            "blocks": [
+                {
+                    "name": "normalize_each",
+                    "kind": "loop",
+                    "inputs": {"text": {"binding": "item"}},
+                    "steps": [
+                        {
+                            "name": "normalize",
+                            "skill_id": "text.normalize.v1",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                        }
+                    ],
+                    "final_outputs": {"normalized": {"step": "normalize", "port": "normalized"}},
+                }
+            ],
+            "final_outputs": {"normalized": {"step": "normalize_each", "port": "normalized"}},
+            "effects": ["pure"],
+        })
+        repaired_block = json.dumps({
+            "block": {
+                "name": "normalize_each",
+                "kind": "loop",
+                "collection": {"step": "prepare", "port": "value"},
+                "inputs": {"text": {"binding": "item"}},
+                "steps": [
+                    {
+                        "name": "normalize",
+                        "skill_id": "text.normalize.v1",
+                        "sources": {"text": {"step": "input", "port": "text"}},
+                    }
+                ],
+                "final_outputs": {"normalized": {"step": "normalize", "port": "normalized"}},
+                "max_items": 100,
+            }
+        })
+
+        class FixedProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                self.calls += 1
+                return first_ir if self.calls == 1 else repaired_block
+
+        provider = FixedProvider()
+        backend = IRPlannerBackend(provider)  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="normalize each item", candidates=[]))
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert provider.calls == 2
+        assert any("regenerated loop block locally" in action for action in result.repair_actions)
+        ids = {node.id for node in result.graph.graph.nodes}
+        assert "prepare" in ids
+        assert "normalize_each" in ids
+
+    def test_backend_regenerates_invalid_branch_block_locally(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        first_ir = json.dumps({
+            "inputs": [{"name": "text", "type": "string"}, {"name": "enabled", "type": "boolean"}],
+            "steps": [],
+            "blocks": [
+                {
+                    "name": "format_branch",
+                    "kind": "branch",
+                    "condition": {"step": "input", "port": "enabled"},
+                    "inputs": {"text": {"step": "input", "port": "text"}},
+                    "then_steps": [
+                        {
+                            "name": "then_render",
+                            "skill_id": "template.render",
+                            "sources": {"text": {"step": "input", "port": "text"}},
+                            "config": {"template": "then:{{text}}"},
+                        }
+                    ],
+                    "then_outputs": {"rendered": {"step": "then_render", "port": "rendered"}},
+                }
+            ],
+            "final_outputs": {"rendered": {"step": "format_branch", "port": "rendered"}},
+            "effects": ["pure"],
+        })
+        repaired_block = json.dumps({
+            "block": {
+                "name": "format_branch",
+                "kind": "branch",
+                "condition": {"step": "input", "port": "enabled"},
+                "inputs": {"text": {"step": "input", "port": "text"}},
+                "then_steps": [
+                    {
+                        "name": "then_render",
+                        "skill_id": "template.render",
+                        "sources": {"text": {"step": "input", "port": "text"}},
+                        "config": {"template": "then:{{text}}"},
+                    }
+                ],
+                "else_steps": [
+                    {
+                        "name": "else_render",
+                        "skill_id": "template.render",
+                        "sources": {"text": {"step": "input", "port": "text"}},
+                        "config": {"template": "else:{{text}}"},
+                    }
+                ],
+                "then_outputs": {"rendered": {"step": "then_render", "port": "rendered"}},
+                "else_outputs": {"rendered": {"step": "else_render", "port": "rendered"}}
+            }
+        })
+
+        class FixedProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                self.calls += 1
+                return first_ir if self.calls == 1 else repaired_block
+
+        provider = FixedProvider()
+        backend = IRPlannerBackend(provider)  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="conditionally format", candidates=[]))
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert provider.calls == 2
+        assert any("regenerated branch block locally" in action for action in result.repair_actions)
+        assert result.graph.graph.outputs["rendered"] == "format_branch_merge_rendered.result"
+
+
+class TestIRRepair:
+    def test_repair_infers_branch_outputs_from_parent_refs(self) -> None:
+        from graphsmith.planner.compiler import InvalidBranchBlockError
+
+        ir = PlanningIR(
+            goal="conditionally format",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_branch",
+                    kind="branch",
+                    condition=IRSource(step="input", port="enabled"),
+                    inputs={"text": IRSource(step="input", port="text")},
+                    then_steps=[
+                        IRStep(
+                            name="then_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "then:{{text}}"},
+                        )
+                    ],
+                    else_steps=[
+                        IRStep(
+                            name="else_render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "else:{{text}}"},
+                        )
+                    ],
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_branch", port="rendered")},
+        )
+        repaired = repair_ir_locally(
+            ir, InvalidBranchBlockError("format_branch", "must declare both then_outputs and else_outputs"),
+        )
+        block = repaired.ir.blocks[0]
+        assert block.then_outputs["rendered"].step == "then_render"
+        assert block.else_outputs["rendered"].step == "else_render"
+        assert len(repaired.actions) == 2
+
+    def test_repair_infers_loop_outputs_and_item_binding(self) -> None:
+        from graphsmith.planner.compiler import InvalidLoopBlockError
+
+        ir = PlanningIR(
+            goal="normalize lines",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="normalize_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={"text": IRSource(step="input", port="items")},
+                    steps=[
+                        IRStep(
+                            name="normalize",
+                            skill_id="text.normalize.v1",
+                            sources={"text": IRSource(step="input", port="text")},
+                        )
+                    ],
+                )
+            ],
+            final_outputs={"normalized": IROutputRef(step="normalize_each", port="normalized")},
+        )
+        repaired = repair_ir_locally(
+            ir, InvalidLoopBlockError("normalize_each", "must declare at least one final output"),
+        )
+        block = repaired.ir.blocks[0]
+        assert block.final_outputs["normalized"].step == "normalize"
+        assert block.inputs["text"].binding == "item"
+        assert len(repaired.actions) == 2
+
+    def test_normalize_branch_if_aliases(self) -> None:
+        ir = PlanningIR(
+            goal="branch",
+            inputs=[IRInput(name="text"), IRInput(name="enabled", type="boolean")],
+            steps=[
+                IRStep(
+                    name="pick",
+                    skill_id="branch.if",
+                    sources={
+                        "condition": IRSource(step="input", port="enabled"),
+                        "if_true": IRSource(step="input", port="text"),
+                        "if_false": IRSource(step="input", port="text"),
+                    },
+                )
+            ],
+            final_outputs={"result": IROutputRef(step="pick", port="result")},
+        )
+        normalized = normalize_ir_contracts(ir)
+        step = normalized.ir.steps[0]
+        assert "then_value" in step.sources
+        assert "else_value" in step.sources
+        assert "if_true" not in step.sources
+        assert "if_false" not in step.sources
+        assert normalized.actions
+
+    def test_normalize_array_map_operation_lifts_to_parallel_map(self) -> None:
+        ir = PlanningIR(
+            goal="loop",
+            inputs=[IRInput(name="strings", type="array<string>")],
+            steps=[
+                IRStep(
+                    name="normalize",
+                    skill_id="array.map",
+                    sources={"array": IRSource(step="input", port="strings")},
+                    config={"operation": "text.normalize"},
+                )
+            ],
+            final_outputs={"mapped": IROutputRef(step="normalize", port="results")},
+        )
+        normalized = normalize_ir_contracts(ir)
+        step = normalized.ir.steps[0]
+        assert step.skill_id == "parallel.map"
+        assert "items" in step.sources
+        assert step.config["op"] == "text.normalize"
+        assert step.config["item_input"] == "text"
+        assert normalized.ir.final_outputs["mapped"].port == "results"
+
+    def test_backend_repairs_branch_if_contract_for_execution(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        ir_json = json.dumps({
+            "inputs": [
+                {"name": "text", "type": "string"},
+                {"name": "enabled", "type": "boolean"},
+            ],
+            "steps": [
+                {
+                    "name": "normalize",
+                    "skill_id": "text.normalize.v1",
+                    "sources": {"text": {"step": "input", "port": "text"}},
+                },
+                {
+                    "name": "branch",
+                    "skill_id": "branch.if",
+                    "sources": {
+                        "condition": {"step": "input", "port": "enabled"},
+                        "if_true": {"step": "normalize", "port": "normalized"},
+                        "if_false": {"step": "input", "port": "text"},
+                    },
+                },
+            ],
+            "final_outputs": {"result": {"step": "branch", "port": "result"}},
+            "effects": ["pure"],
+        })
+
+        class FixedProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                return ir_json
+
+        backend = IRPlannerBackend(FixedProvider())  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="branch", candidates=[]))
+        assert result.status == "success"
+        assert any("branch.if" in action for action in result.repair_actions)
+
+    def test_backend_repairs_array_map_shorthand(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        ir_json = json.dumps({
+            "inputs": [{"name": "strings", "type": "array<string>"}],
+            "steps": [
+                {
+                    "name": "normalize",
+                    "skill_id": "array.map",
+                    "sources": {"array": {"step": "input", "port": "strings"}},
+                    "config": {"operation": "text.normalize"},
+                }
+            ],
+            "final_outputs": {"results": {"step": "normalize", "port": "results"}},
+            "effects": ["pure"],
+        })
+
+        class FixedProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                return ir_json
+
+        backend = IRPlannerBackend(FixedProvider())  # type: ignore[arg-type]
+        result = backend.compose(PlanRequest(goal="loop", candidates=[]))
+        assert result.status == "success"
+        assert result.graph is not None
+        node = result.graph.graph.nodes[0]
+        assert node.op == "parallel.map"
+        assert any("parallel.map" in action for action in result.repair_actions)

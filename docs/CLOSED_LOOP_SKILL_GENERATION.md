@@ -13,6 +13,8 @@ validating it, and replanning — all in one bounded loop.
 5. Ask user to confirm
 6. Publish to temporary registry
 7. Replan with new skill available
+8. If the goal is still a single-step capability and replan fails,
+   build a deterministic one-skill fallback graph
 ```
 
 ## Supported scope
@@ -70,7 +72,10 @@ Detection is narrow and explicit:
 
 1. Initial planning must fail (no valid plan produced)
 2. Goal must match an autogen template keyword
-3. The matching skill must not already be in candidate plans
+3. If the exact matching skill already exists in the registry, Graphsmith will
+   do one targeted retry with that skill explicitly prepended to the candidate list
+4. Otherwise the matching skill must not already exist in the registry or candidate set
+5. The matching skill must not already be used in compiled candidate plans
 
 If any condition is not met, no generation is attempted.
 
@@ -98,6 +103,48 @@ explicit. Common stop reasons are:
 - publish failed
 - replan failed after publication
 
+## Recent improvements
+
+- `graphsmith solve` is now a real CLI entrypoint again.
+- `solve` defaults to the IR backend so the closed-loop path is actually
+  exercised instead of falling through to the mock planner.
+- Missing-skill detection now checks the live registry/candidate set before
+  deciding a capability is truly absent.
+- Autogen matching now handles more natural phrasing variants such as
+  `pretty print this json` and `count the characters`.
+- If the exact generated skill already exists in the registry, Graphsmith now
+  does one targeted retry before giving up.
+- Generated ops are now cleaned up after the bounded loop, so autogen does not
+  leak transient runtime ops into unrelated later commands.
+- For true single-step capabilities, Graphsmith can now fall back to a
+  deterministic one-node `skill.invoke` graph when replan still fails.
+- For simple text-only multi-stage goals, Graphsmith can now build a
+  deterministic linear fallback graph that composes existing skills with the
+  generated skill when full replan still fails.
+- That bounded multi-stage fallback now also covers mixed JSON-plus-generated
+  chains such as `json.extract_field -> json.pretty_print -> text.contains`
+  when only one generated text capability is actually missing.
+- If no skill is missing but the planner still fails on a deterministic
+  multi-skill pipeline, Graphsmith can now build a bounded existing-skill
+  fallback for chains like `normalize -> sort_lines -> remove_duplicates ->
+  join_lines`.
+- Generated predicates/transforms like `contains`, `starts_with`, `replace`,
+  `strip_prefix`, and `strip_suffix` now expose their variable arguments as
+  real graph inputs instead of opaque config values, so they can participate in
+  composition and future repair more naturally.
+- Bounded fallbacks are now stricter about semantic overclaiming:
+  loop-shaped goals and goals that clearly need multiple generated skills no
+  longer get marked as success just because a smaller executable graph exists.
+- Closed-loop now derives explicit policy constraints from the goal for
+  `published-only` and `trusted published only` requests, passes them into the
+  planner prompt, filters retrieval when provenance metadata is available, and
+  refuses to claim success by generating a new skill when the goal forbids it.
+- Closed-loop now rejects a class of executable-but-wrong plans where the model
+  substitutes a near-miss predicate or formatter for the exact missing
+  generated capability. If a successful graph omits the exact requested
+  generated skill or its required public inputs, Graphsmith continues into the
+  bounded repair/generation path instead of accepting the first plan.
+
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of
 `replan_failed` is expected: generation and validation still run, but the
@@ -109,7 +156,9 @@ echo provider does not produce a usable replan.
 - Only covers the 21 template families in the autogen catalog
 - Cannot generate multi-step or LLM-dependent skills
 - Cannot handle cases where multiple skills are missing
-- Does not learn from failures
+- Config-bearing generated skills inside larger plans are still the main weak spot
+- Semantic fidelity of bounded fallback graphs is now a more important frontier
+  concern than raw executability in some harder cases
 
 ## Files
 

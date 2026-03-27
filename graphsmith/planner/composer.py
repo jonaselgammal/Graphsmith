@@ -19,13 +19,14 @@ from graphsmith.planner.models import (
     PlanResult,
     UnresolvedHole,
 )
-from graphsmith.registry.local import LocalRegistry
+from graphsmith.planner.policy import derive_goal_constraints
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.validator import validate_skill_package
 
 
 def compose_plan(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     backend: PlannerBackend,
     *,
     constraints: list[str] | None = None,
@@ -47,7 +48,7 @@ def compose_plan(
     request = PlanRequest(
         goal=goal,
         candidates=candidates,
-        constraints=constraints or [],
+        constraints=[*derive_goal_constraints(goal), *(constraints or [])],
         desired_outputs=desired_outputs or [],
     )
 
@@ -60,15 +61,31 @@ def compose_plan(
 
     # 4. Validate the graph if present
     if result.graph is not None:
-        result = _validate_glue_graph(result)
+        result = _validate_glue_graph(result, registry=registry)
 
     return result
 
 
-def _validate_glue_graph(result: PlanResult) -> PlanResult:
+def _validate_glue_graph(
+    result: PlanResult,
+    *,
+    registry: RegistryBackend | None = None,
+) -> PlanResult:
     """Wrap the GlueGraph in a synthetic SkillPackage and validate it."""
+    from graphsmith.planner.graph_repair import normalize_glue_graph_contracts
+
     glue = result.graph
     assert glue is not None
+    glue, actions = normalize_glue_graph_contracts(glue, registry=registry)
+    if actions:
+        result = result.model_copy(
+            update={
+                "graph": glue,
+                "repair_actions": [*result.repair_actions, *actions],
+            }
+        )
+    else:
+        result = result.model_copy(update={"graph": glue})
 
     pkg = glue_to_skill_package(glue)
 
@@ -115,24 +132,62 @@ def run_glue_graph(
     inputs: dict[str, Any],
     *,
     llm_provider: LLMProvider | None = None,
-    registry: LocalRegistry | None = None,
+    registry: RegistryBackend | None = None,
 ) -> Any:
     """Validate and execute a GlueGraph. Returns an ExecutionResult.
 
     Raises PlannerError if the glue graph fails validation.
     Raises ExecutionError if execution fails.
     """
+    from graphsmith.planner.graph_repair import (
+        normalize_glue_graph_contracts,
+        repair_glue_graph_from_runtime_error,
+        repair_glue_graph_from_runtime_trace,
+    )
     from graphsmith.runtime.executor import run_skill_package
 
-    pkg = glue_to_skill_package(glue)
-    try:
-        validate_skill_package(pkg)
-    except ValidationError as exc:
-        raise PlannerError(f"Glue graph validation failed: {exc}") from exc
-
-    return run_skill_package(
-        pkg, inputs, llm_provider=llm_provider, registry=registry,
+    current_glue, runtime_repairs = normalize_glue_graph_contracts(
+        glue, registry=registry,
     )
+    used_trace_regeneration = False
+    for attempt in range(3):
+        pkg = glue_to_skill_package(current_glue)
+        try:
+            validate_skill_package(pkg)
+        except ValidationError as exc:
+            raise PlannerError(f"Glue graph validation failed: {exc}") from exc
+
+        try:
+            result = run_skill_package(
+                pkg, inputs, llm_provider=llm_provider, registry=registry,
+            )
+            result.repairs = list(runtime_repairs)
+            return result
+        except ExecutionError as exc:
+            repaired_glue, actions = repair_glue_graph_from_runtime_error(
+                current_glue, str(exc), registry=registry,
+            )
+            if actions:
+                current_glue = repaired_glue
+                runtime_repairs.extend(actions)
+                continue
+
+            if not used_trace_regeneration:
+                repaired_glue, actions = repair_glue_graph_from_runtime_trace(
+                    current_glue,
+                    str(exc),
+                    trace=getattr(exc, "trace", None),
+                    llm_provider=llm_provider,
+                    registry=registry,
+                )
+                if actions:
+                    used_trace_regeneration = True
+                    current_glue = repaired_glue
+                    runtime_repairs.extend(actions)
+                    continue
+            raise
+
+    raise PlannerError("Glue graph execution repair loop exited unexpectedly")
 
 
 def save_plan(glue: GlueGraph, path: str | Path) -> None:

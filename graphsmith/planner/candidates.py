@@ -1,4 +1,4 @@
-"""Candidate skill retrieval from the local registry."""
+"""Candidate skill retrieval from local or remote-backed registries."""
 from __future__ import annotations
 
 import re
@@ -6,8 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from graphsmith.registry.base import RegistryBackend
 from graphsmith.registry.index import IndexEntry
-from graphsmith.registry.local import LocalRegistry
+from graphsmith.planner.policy import filter_candidates_by_goal_policy
 
 _DEFAULT_MAX = 8
 
@@ -59,11 +60,14 @@ class RetrievalDiagnostics(BaseModel):
     candidates: list[str] = Field(default_factory=list)
     scores: dict[str, int] = Field(default_factory=dict)
     candidate_count: int = 0
+    registry_size: int = 0
+    empty_registry: bool = False
+    fallback_used: bool = False
 
 
 def retrieve_candidates(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = _DEFAULT_MAX,
     mode: str = "ranked",
@@ -77,25 +81,29 @@ def retrieve_candidates(
 
 def retrieve_candidates_with_diagnostics(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = _DEFAULT_MAX,
     mode: str = "ranked",
 ) -> tuple[RetrievalDiagnostics, list[IndexEntry]]:
     """Retrieve candidates and return diagnostics alongside."""
     if mode == "broad":
-        return _retrieve_broad(goal, registry, max_candidates=max(max_candidates, 15))
+        diag, entries = _retrieve_broad(goal, registry, max_candidates=max(max_candidates, 15))
     elif mode == "ranked_broad":
-        return _retrieve_ranked(goal, registry, max_candidates=12, use_stems=False, mode_name="ranked_broad")
+        diag, entries = _retrieve_ranked(goal, registry, max_candidates=12, use_stems=False, mode_name="ranked_broad")
     elif mode == "ranked_recall":
-        return _retrieve_ranked(goal, registry, max_candidates=10, use_stems=True, mode_name="ranked_recall")
+        diag, entries = _retrieve_ranked(goal, registry, max_candidates=10, use_stems=True, mode_name="ranked_recall")
     else:
-        return _retrieve_ranked(goal, registry, max_candidates=max_candidates, use_stems=False, mode_name="ranked")
+        diag, entries = _retrieve_ranked(goal, registry, max_candidates=max_candidates, use_stems=False, mode_name="ranked")
+    filtered = filter_candidates_by_goal_policy(entries, goal)
+    diag.candidates = [e.id for e in filtered]
+    diag.candidate_count = len(filtered)
+    return diag, filtered
 
 
 def _retrieve_ranked(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = _DEFAULT_MAX,
     use_stems: bool = False,
@@ -109,6 +117,8 @@ def _retrieve_ranked(
     diag = RetrievalDiagnostics(
         goal=goal, mode=mode_name,
         raw_tokens=raw_tokens, expanded_tokens=tokens,
+        registry_size=len(all_entries),
+        empty_registry=not all_entries,
     )
 
     if not tokens or not all_entries:
@@ -126,6 +136,7 @@ def _retrieve_ranked(
     results = [entry for score, entry in scored if score > 0]
     if not results:
         results = all_entries
+        diag.fallback_used = bool(all_entries)
     results = results[:max_candidates]
 
     diag.candidates = [e.id for e in results]
@@ -135,19 +146,20 @@ def _retrieve_ranked(
 
 def _retrieve_broad(
     goal: str,
-    registry: LocalRegistry,
+    registry: RegistryBackend,
     *,
     max_candidates: int = 15,
 ) -> tuple[RetrievalDiagnostics, list[IndexEntry]]:
     """Broad retrieval: no stop words, no synonyms, substring matching."""
     raw_tokens = _tokenise_no_filter(goal)
+    all_entries = registry.list_all()
 
     diag = RetrievalDiagnostics(
         goal=goal, mode="broad",
         raw_tokens=raw_tokens, expanded_tokens=raw_tokens,
+        registry_size=len(all_entries),
+        empty_registry=not all_entries,
     )
-
-    all_entries = registry.list_all()
     seen: dict[tuple[str, str], IndexEntry] = {}
 
     for token in raw_tokens:
@@ -158,6 +170,7 @@ def _retrieve_broad(
 
     if not seen:
         results = all_entries
+        diag.fallback_used = bool(all_entries)
     else:
         results = sorted(seen.values(), key=lambda e: (e.id, e.version))
 

@@ -15,8 +15,18 @@ from graphsmith.planner.decomposition import (
     parse_decomposition,
 )
 from graphsmith.planner.ir import PlanningIR
-from graphsmith.planner.ir_parser import IRParseError, parse_ir_output
-from graphsmith.planner.ir_prompt import build_ir_planning_context, get_ir_system_message
+from graphsmith.planner.ir_parser import IRParseError, parse_ir_block_output, parse_ir_output
+from graphsmith.planner.ir_prompt import (
+    build_ir_block_repair_context,
+    build_ir_planning_context,
+    get_ir_block_repair_system_message,
+    get_ir_system_message,
+)
+from graphsmith.planner.repair import (
+    infer_block_output_ports,
+    normalize_ir_contracts,
+    repair_ir_locally,
+)
 from graphsmith.planner.ir_scorer import ScoreBreakdown, score_candidate
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult, UnresolvedHole
 
@@ -30,6 +40,7 @@ class CandidateResult(BaseModel):
     glue: GlueGraph | None = None
     score: ScoreBreakdown | None = None
     error: str = ""
+    repairs: list[str] = Field(default_factory=list)
 
 
 class IRPlannerBackend:
@@ -111,7 +122,7 @@ class IRPlannerBackend:
                 reasoning=f"Raw output: {raw[:200]}", candidates_considered=cand_ids,
             )
 
-        glue, err = self._compile(ir)
+        glue, err, repairs = self._compile(ir, request)
         if err:
             return PlanResult(
                 status="failure", holes=[err],
@@ -121,6 +132,7 @@ class IRPlannerBackend:
         return PlanResult(
             status="success", graph=glue,
             reasoning=ir.reasoning, candidates_considered=cand_ids,
+            repair_actions=repairs,
         )
 
     def _compose_reranked(
@@ -132,7 +144,7 @@ class IRPlannerBackend:
         candidates: list[CandidateResult] = []
 
         for i in range(self._candidate_count):
-            cand = self._process_one_candidate(prompt, request.goal, i, decomp)
+            cand = self._process_one_candidate(prompt, request, i, decomp)
             candidates.append(cand)
 
         self._last_candidates = candidates
@@ -152,6 +164,7 @@ class IRPlannerBackend:
                 graph=best.glue,
                 reasoning=" | ".join(p for p in reasoning_parts if p),
                 candidates_considered=cand_ids,
+                repair_actions=best.repairs,
             )
 
         errors = [c.error for c in candidates if c.error]
@@ -183,7 +196,7 @@ class IRPlannerBackend:
     def _process_one_candidate(
         self,
         prompt: str,
-        goal: str,
+        request: PlanRequest,
         index: int,
         decomp: SemanticDecomposition | None,
     ) -> CandidateResult:
@@ -194,21 +207,26 @@ class IRPlannerBackend:
                 index=index, status="provider_error", error=str(err.description),
             )
 
-        ir, err = self._parse(raw, goal)
+        ir, err = self._parse(raw, request.goal)
         if err:
             return CandidateResult(
                 index=index, status="parse_error", error=str(err.description),
             )
 
-        glue, err = self._compile(ir)
+        glue, err, repairs = self._compile(ir, request)
         if err:
             return CandidateResult(
                 index=index, status="compile_error", ir=ir, error=str(err.description),
             )
 
-        score = score_candidate(ir, goal, decomposition=decomp)
+        score = score_candidate(ir, request.goal, decomposition=decomp)
         return CandidateResult(
-            index=index, status="compiled", ir=ir, glue=glue, score=score,
+            index=index,
+            status="compiled",
+            ir=ir,
+            glue=glue,
+            score=score,
+            repairs=repairs,
         )
 
     # ── Helper methods ─────────────────────────────────────────────
@@ -241,15 +259,108 @@ class IRPlannerBackend:
                 description=f"Failed to parse IR: {exc}",
             )
 
-    def _compile(self, ir: PlanningIR) -> tuple[GlueGraph | None, UnresolvedHole | None]:
+    def _compile(
+        self,
+        ir: PlanningIR,
+        request: PlanRequest,
+    ) -> tuple[GlueGraph | None, UnresolvedHole | None, list[str]]:
+        normalized = normalize_ir_contracts(ir)
+        ir = normalized.ir
+        repair_actions = [
+            f"{action.target}: {action.action}"
+            for action in normalized.actions
+        ]
         try:
             glue = compile_ir(ir)
-            return glue, None
+            return glue, None, repair_actions
         except CompilerError as exc:
+            repaired = repair_ir_locally(ir, exc)
+            latest_error = exc
+            if repaired.actions:
+                try:
+                    glue = compile_ir(repaired.ir)
+                    return glue, None, [
+                        *repair_actions,
+                        *[
+                            f"{action.target}: {action.action}"
+                            for action in repaired.actions
+                        ],
+                    ]
+                except CompilerError as repaired_exc:
+                    latest_error = repaired_exc
+                    repair_actions = [
+                        *repair_actions,
+                        *[
+                            f"{action.target}: {action.action}"
+                            for action in repaired.actions
+                        ],
+                    ]
+                    ir = repaired.ir
+            regenerated_ir, regen_actions = self._regenerate_failed_block(
+                ir, latest_error, request,
+            )
+            if regenerated_ir is not None:
+                regen_normalized = normalize_ir_contracts(regenerated_ir)
+                regen_repair_actions = [
+                    *repair_actions,
+                    *regen_actions,
+                    *[
+                        f"{action.target}: {action.action}"
+                        for action in regen_normalized.actions
+                    ],
+                ]
+                try:
+                    glue = compile_ir(regen_normalized.ir)
+                    return glue, None, regen_repair_actions
+                except CompilerError:
+                    pass
             return None, UnresolvedHole(
                 node_id="(compiler)", kind="validation_error",
-                description=f"Compiler error ({exc.phase}): {exc}",
-            )
+                description=f"Compiler error ({latest_error.phase}): {latest_error}",
+            ), repair_actions
+
+    def _regenerate_failed_block(
+        self,
+        ir: PlanningIR,
+        error: CompilerError,
+        request: PlanRequest,
+    ) -> tuple[PlanningIR | None, list[str]]:
+        block_name = str(error.details.get("block_name", ""))
+        if not block_name:
+            return None, []
+
+        block = next((candidate for candidate in ir.blocks if candidate.name == block_name), None)
+        if block is None or block.kind not in {"loop", "branch"}:
+            return None, []
+
+        prompt = build_ir_block_repair_context(
+            request,
+            ir=ir,
+            block=block,
+            error=error,
+            required_outputs=infer_block_output_ports(ir, block.name),
+        )
+        raw, provider_error = self._call_llm(
+            prompt, system=get_ir_block_repair_system_message(),
+        )
+        if provider_error is not None:
+            return None, []
+
+        try:
+            repaired_block = parse_ir_block_output(raw)
+        except IRParseError:
+            return None, []
+
+        if repaired_block.name != block.name or repaired_block.kind != block.kind:
+            return None, []
+
+        repaired_blocks = [
+            repaired_block if candidate.name == block_name else candidate
+            for candidate in ir.blocks
+        ]
+        return ir.model_copy(update={"blocks": repaired_blocks}), [
+            f"block:{block_name}: regenerated {block.kind} block locally via LLM"
+        ]
 
 
 def _decomp_contract_section(decomp: SemanticDecomposition) -> str:

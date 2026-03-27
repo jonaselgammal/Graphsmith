@@ -1,0 +1,11 @@
+{
+  "id": "f03",
+  "goal": "Normalize this text, extract keywords, replace commas with newlines, and return the formatted keywords",
+  "tier": 1,
+  "tags": ["text", "llm", "generated", "formatting"],
+  "expected_success": true,
+  "required_skill_ids": ["text.normalize.v1", "text.extract_keywords.v1", "text.replace.v1"],
+  "required_graph_inputs": ["old", "new"],
+  "min_node_count": 3,
+  "notes": "Existing normalize and keyword extraction composed with a generated formatting transform."
+}

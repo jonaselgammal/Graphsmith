@@ -1,0 +1,11 @@
+{
+  "id": "f07",
+  "goal": "Parse this JSON, extract the value field, convert it to uppercase, and check whether it starts with a prefix",
+  "tier": 3,
+  "tags": ["json", "text", "multi_generated", "predicate"],
+  "expected_success": true,
+  "required_skill_ids": ["json.extract_field.v1", "text.uppercase.v1", "text.starts_with.v1"],
+  "required_graph_inputs": ["prefix"],
+  "min_node_count": 3,
+  "notes": "Existing JSON extraction plus two generated text capabilities."
+}

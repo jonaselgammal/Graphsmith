@@ -1,13 +1,22 @@
-"""Tests for the local registry."""
+"""Tests for local, remote, aggregated, and HTTP-backed registries."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
+import time
 from typing import Any
 
+import httpx
 import pytest
 
 from graphsmith.exceptions import ParseError, RegistryError, ValidationError
-from graphsmith.registry import LocalRegistry
+from graphsmith.registry import (
+    AggregatedRegistry,
+    FileRemoteRegistry,
+    LocalRegistry,
+    RemoteRegistryClient,
+)
 
 from conftest import (
     EXAMPLE_DIR,
@@ -24,6 +33,18 @@ def reg(tmp_path: Path) -> LocalRegistry:
     return LocalRegistry(root=tmp_path / "registry")
 
 
+@pytest.fixture()
+def remote_reg(tmp_path: Path) -> FileRemoteRegistry:
+    """A fresh file-backed remote registry in a tmp dir."""
+    return FileRemoteRegistry(
+        root=tmp_path / "remote-registry",
+        registry_id="test-remote",
+        registry_url="https://skills.example.test",
+        owner="graphsmith-tests",
+        trust_score=0.8,
+    )
+
+
 # ── publish ──────────────────────────────────────────────────────────
 
 
@@ -36,6 +57,9 @@ class TestPublish:
         assert "text" in entry.input_names
         assert "summary" in entry.output_names
         assert entry.published_at  # non-empty
+        assert entry.source_kind == "local"
+        assert entry.registry_id == str(reg.root)
+        assert entry.registry_url == f"file://{reg.root}"
 
     def test_publish_creates_files(self, reg: LocalRegistry) -> None:
         reg.publish(EXAMPLE_DIR / "text.summarize.v1")
@@ -90,6 +114,37 @@ class TestPublish:
         entry, _ = reg.publish(tmp_path / "pkg")
         assert entry.id == "test.minimal.v1"
 
+    def test_publish_parallel_writers_do_not_clobber_index(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        reg_root = tmp_path / "registry"
+        barrier = threading.Barrier(3)
+        original_save_index = LocalRegistry._save_index
+
+        def delayed_save(self: LocalRegistry, entries: list[Any]) -> None:
+            time.sleep(0.05)
+            original_save_index(self, entries)
+
+        def publish_one(skill_dir: Path) -> None:
+            barrier.wait()
+            LocalRegistry(reg_root).publish(skill_dir)
+
+        monkeypatch.setattr(LocalRegistry, "_save_index", delayed_save)
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [
+                pool.submit(publish_one, EXAMPLE_DIR / "text.normalize.v1"),
+                pool.submit(publish_one, EXAMPLE_DIR / "text.title_case.v1"),
+                pool.submit(publish_one, EXAMPLE_DIR / "text.word_count.v1"),
+            ]
+            for future in futures:
+                future.result()
+
+        ids = {entry.id for entry in LocalRegistry(reg_root).list_all()}
+        assert ids == {
+            "text.normalize.v1",
+            "text.title_case.v1",
+            "text.word_count.v1",
+        }
+
 
 # ── fetch ────────────────────────────────────────────────────────────
 
@@ -124,6 +179,161 @@ class TestFetch:
         assert a.skill.id == b.skill.id
         assert a.skill.version == b.skill.version
         assert len(a.graph.nodes) == len(b.graph.nodes)
+
+
+class TestRemoteRegistry:
+    def test_publish_sets_remote_provenance(self, remote_reg: FileRemoteRegistry) -> None:
+        entry, _ = remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        assert entry.id == "text.summarize.v1"
+        assert entry.source_kind == "remote"
+        assert entry.registry_id == "test-remote"
+        assert entry.registry_url == "https://skills.example.test"
+        assert entry.publisher == "graphsmith-tests"
+        assert entry.trust_score == 0.8
+        assert entry.remote_ref == "test-remote:text.summarize.v1@1.0.0"
+
+    def test_fetch_remote_skill(self, remote_reg: FileRemoteRegistry) -> None:
+        remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        pkg = remote_reg.fetch("text.summarize.v1", "1.0.0")
+        assert pkg.skill.id == "text.summarize.v1"
+
+    def test_search_remote_skill(self, remote_reg: FileRemoteRegistry) -> None:
+        remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        results = remote_reg.search("summarize")
+        assert len(results) == 1
+        assert results[0].source_kind == "remote"
+
+
+class TestAggregatedRegistry:
+    def test_search_merges_local_and_remote(
+        self,
+        reg: LocalRegistry,
+        remote_reg: FileRemoteRegistry,
+    ) -> None:
+        reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        remote_reg.publish(EXAMPLE_DIR / "text.word_count.v1")
+        agg = AggregatedRegistry(reg, [remote_reg])
+        ids = [entry.id for entry in agg.search("")]
+        assert ids == ["text.summarize.v1", "text.word_count.v1"]
+
+    def test_fetch_falls_back_to_remote(
+        self,
+        reg: LocalRegistry,
+        remote_reg: FileRemoteRegistry,
+    ) -> None:
+        remote_reg.publish(EXAMPLE_DIR / "text.word_count.v1")
+        agg = AggregatedRegistry(reg, [remote_reg])
+        pkg = agg.fetch("text.word_count.v1", "1.0.0")
+        assert pkg.skill.id == "text.word_count.v1"
+
+    def test_search_prefers_local_entry_on_duplicate(
+        self,
+        reg: LocalRegistry,
+        remote_reg: FileRemoteRegistry,
+    ) -> None:
+        reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        remote_reg.publish(EXAMPLE_DIR / "text.summarize.v1")
+        agg = AggregatedRegistry(reg, [remote_reg])
+        [entry] = agg.search("summarize")
+        assert entry.source_kind == "local"
+        assert entry.registry_id == str(reg.root)
+
+
+class TestRemoteRegistryClient:
+    def test_manifest_round_trip(self, remote_registry_server) -> None:
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=remote_registry_server["transport"],
+        )
+        manifest = client.manifest
+        assert manifest.registry_id == "mock-http-remote"
+        assert manifest.owner == "graphsmith-tests"
+
+    def test_publish_fetch_and_search_round_trip(self, remote_registry_server) -> None:
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
+            transport=remote_registry_server["transport"],
+        )
+        entry, warnings = client.publish(EXAMPLE_DIR / "text.summarize.v1")
+        assert warnings == []
+        assert entry.id == "text.summarize.v1"
+        assert entry.source_kind == "remote"
+        results = client.search("summarize")
+        assert [item.id for item in results] == ["text.summarize.v1"]
+        pkg = client.fetch("text.summarize.v1", "1.0.0")
+        assert pkg.skill.id == "text.summarize.v1"
+        assert len(pkg.graph.nodes) == 2
+
+    def test_aggregated_registry_uses_http_remote(
+        self,
+        reg: LocalRegistry,
+        remote_registry_server,
+    ) -> None:
+        reg.publish(EXAMPLE_DIR / "text.word_count.v1")
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
+            transport=remote_registry_server["transport"],
+        )
+        client.publish(EXAMPLE_DIR / "text.summarize.v1")
+        agg = AggregatedRegistry(reg, [client])
+        ids = [entry.id for entry in agg.search("")]
+        assert ids == ["text.summarize.v1", "text.word_count.v1"]
+
+    def test_publish_requires_bearer_token(self, remote_registry_server) -> None:
+        client = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=remote_registry_server["transport"],
+        )
+        with pytest.raises(RegistryError, match="401"):
+            client.publish(EXAMPLE_DIR / "text.summarize.v1")
+
+    def test_fetch_uses_cached_package_on_remote_failure(self, tmp_path: Path, remote_registry_server) -> None:
+        cache_root = tmp_path / "remote-cache"
+        online = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
+            transport=remote_registry_server["transport"],
+            cache_root=cache_root,
+        )
+        online.publish(EXAMPLE_DIR / "text.summarize.v1")
+        pkg = online.fetch("text.summarize.v1", "1.0.0")
+        assert pkg.skill.id == "text.summarize.v1"
+
+        def failing_transport(request):
+            return httpx.Response(503, json={"error": "offline"})
+
+        offline = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=httpx.MockTransport(failing_transport),
+            cache_root=cache_root,
+        )
+        cached_pkg = offline.fetch("text.summarize.v1", "1.0.0")
+        assert cached_pkg.skill.id == "text.summarize.v1"
+
+    def test_search_uses_cached_results_on_remote_failure(self, tmp_path: Path, remote_registry_server) -> None:
+        cache_root = tmp_path / "remote-cache"
+        online = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            auth_token=remote_registry_server["publish_token"],
+            transport=remote_registry_server["transport"],
+            cache_root=cache_root,
+        )
+        online.publish(EXAMPLE_DIR / "text.word_count.v1")
+        results = online.search("count")
+        assert [entry.id for entry in results] == ["text.word_count.v1"]
+
+        def failing_transport(request):
+            return httpx.Response(503, json={"error": "offline"})
+
+        offline = RemoteRegistryClient(
+            remote_registry_server["base_url"],
+            transport=httpx.MockTransport(failing_transport),
+            cache_root=cache_root,
+        )
+        cached_results = offline.search("count")
+        assert [entry.id for entry in cached_results] == ["text.word_count.v1"]
 
 
 # ── search ───────────────────────────────────────────────────────────

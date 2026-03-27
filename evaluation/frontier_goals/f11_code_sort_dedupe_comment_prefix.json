@@ -1,0 +1,11 @@
+{
+  "id": "f11",
+  "goal": "Take these code lines, normalize them, sort them, remove duplicates, and prefix each line with comment markers",
+  "tier": 3,
+  "tags": ["programming", "code", "text", "pipeline"],
+  "expected_success": true,
+  "required_skill_ids": ["text.normalize.v1", "text.sort_lines.v1", "text.remove_duplicates.v1", "text.prefix_lines.v1"],
+  "required_graph_inputs": ["prefix"],
+  "min_node_count": 4,
+  "notes": "Programming-adjacent deterministic pipeline with code-like text rather than prose."
+}

@@ -68,6 +68,37 @@ def parse_ir_output(raw: str, *, goal: str) -> PlanningIR:
         ) from exc
 
 
+def parse_ir_block_output(raw: str) -> IRBlock:
+    """Parse raw LLM text into a typed IRBlock.
+
+    Expected shape:
+    {"block": {...}}
+    """
+    text = _extract_json_text(raw)
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise IRParseError(
+            f"Invalid JSON in block repair output: {exc}",
+            raw_snippet=raw[:500],
+        ) from exc
+
+    if not isinstance(data, dict) or not isinstance(data.get("block"), dict):
+        raise IRParseError(
+            "Expected JSON object with a 'block' object",
+            raw_snippet=raw[:500],
+        )
+
+    try:
+        return _build_block(data["block"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise IRParseError(
+            f"Failed to build IR block from parsed data: {exc}",
+            raw_snippet=raw[:500],
+        ) from exc
+
+
 def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
     """Construct a PlanningIR from parsed JSON data."""
     inputs = [
@@ -87,8 +118,11 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
     steps: list[IRStep] = []
     step_names: set[str] = set()
     for s in data["steps"]:
+        raw_sources = s.get("sources", {})
+        if not isinstance(raw_sources, dict):
+            raise ValueError("step.sources must be an object")
         sources: dict[str, IRSource] = {}
-        for port, src in s.get("sources", {}).items():
+        for port, src in raw_sources.items():
             sources[port] = _normalize_source(src)
         name = s["name"]
         step_names.add(name)
@@ -99,48 +133,12 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
                 version=s.get("version", "1.0.0"),
                 sources=sources,
                 config=s.get("config", {}),
-                when=_normalize_source(s["when"]) if "when" in s else None,
+                when=_normalize_source(s["when"]) if s.get("when") is not None else None,
                 unless=bool(s.get("unless", False)),
             )
         )
 
-    blocks: list[IRBlock] = []
-    for block in data.get("blocks", []):
-        block_steps: list[IRStep] = []
-        block_step_names: set[str] = set()
-        for step in block.get("steps", []):
-            step_sources = {
-                port: _normalize_source(src)
-                for port, src in step.get("sources", {}).items()
-            }
-            block_step_names.add(step["name"])
-            block_steps.append(
-                IRStep(
-                    name=step["name"],
-                    skill_id=step["skill_id"],
-                    version=step.get("version", "1.0.0"),
-                    sources=step_sources,
-                    config=step.get("config", {}),
-                    when=_normalize_source(step["when"]) if "when" in step else None,
-                    unless=bool(step.get("unless", False)),
-                )
-            )
-        blocks.append(
-            IRBlock(
-                name=block["name"],
-                kind=block["kind"],
-                inputs={
-                    port: _normalize_source(src)
-                    for port, src in block.get("inputs", {}).items()
-                },
-                steps=block_steps,
-                final_outputs=_normalize_final_outputs(
-                    block.get("final_outputs", {}),
-                    block_step_names,
-                ),
-                config=block.get("config", {}),
-            )
-        )
+    blocks = [_build_block(block) for block in data.get("blocks", [])]
 
     final_outputs = _normalize_final_outputs(data["final_outputs"], step_names)
 
@@ -159,6 +157,55 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
     )
 
 
+def _build_block(block: dict[str, Any]) -> IRBlock:
+    block_steps = [_build_step(step) for step in block.get("steps", [])]
+    block_step_names = {step.name for step in block_steps}
+    then_steps = [_build_step(step) for step in block.get("then_steps", [])]
+    else_steps = [_build_step(step) for step in block.get("else_steps", [])]
+    raw_inputs = block.get("inputs", {})
+    if not isinstance(raw_inputs, dict):
+        raise ValueError("block.inputs must be an object")
+    return IRBlock(
+        name=block["name"],
+        kind=block["kind"],
+        condition=_normalize_source(block["condition"]) if block.get("condition") is not None else None,
+        collection=_normalize_source(block["collection"]) if block.get("collection") is not None else None,
+        inputs={
+            port: _normalize_source(src)
+            for port, src in raw_inputs.items()
+        },
+        steps=block_steps,
+        then_steps=then_steps,
+        else_steps=else_steps,
+        final_outputs=_normalize_final_outputs(
+            block.get("final_outputs", {}),
+            block_step_names,
+        ),
+        then_outputs=_normalize_final_outputs(
+            block.get("then_outputs", {}),
+            {step.name for step in then_steps},
+        ),
+        else_outputs=_normalize_final_outputs(
+            block.get("else_outputs", {}),
+            {step.name for step in else_steps},
+        ),
+        max_items=int(block.get("max_items", 100)),
+        config=block.get("config", {}),
+    )
+
+
+def _build_step(step: dict[str, Any]) -> IRStep:
+    return IRStep(
+        name=step["name"],
+        skill_id=step["skill_id"],
+        version=step.get("version", "1.0.0"),
+        sources={port: _normalize_source(src) for port, src in step.get("sources", {}).items()},
+        config=step.get("config", {}),
+        when=_normalize_source(step["when"]) if step.get("when") is not None else None,
+        unless=bool(step.get("unless", False)),
+    )
+
+
 def _normalize_source(src: Any, step_names: set[str] | None = None) -> IRSource:
     """Normalize a source value into an IRSource.
 
@@ -169,7 +216,7 @@ def _normalize_source(src: Any, step_names: set[str] | None = None) -> IRSource:
     - "$binding_name" (binding shorthand)
     """
     if isinstance(src, dict):
-        if "binding" in src:
+        if src.get("binding") is not None:
             return IRSource(binding=src["binding"])
         return IRSource(step=src["step"], port=src["port"])
 

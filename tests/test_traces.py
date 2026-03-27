@@ -126,10 +126,13 @@ class TestPromotionCandidates:
         assert len(candidates) == 1
         c = candidates[0]
         assert c.signature == "template.render"
+        assert c.structural_signature == "template.render"
         assert c.frequency == 3
         assert len(c.trace_ids) == 3
         assert "text" in c.inferred_inputs
         assert "result" in c.inferred_outputs
+        assert c.suggested_skill_id.startswith("promoted.")
+        assert c.confidence > 0.0
 
     def test_different_signatures_grouped_separately(
         self, store: TraceStore, tmp_path: Path
@@ -177,8 +180,9 @@ class TestPromotionCandidates:
         )
         d = c.model_dump()
         assert d["signature"] == "template.render -> llm.generate"
+        assert "confidence" in d
         assert d["frequency"] == 5
-        assert "v1 heuristic" in d["notes"]
+        assert "v2 heuristic" in d["notes"]
 
 
 # ── trace summary ────────────────────────────────────────────────────

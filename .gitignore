@@ -40,3 +40,10 @@ site/
 evaluation/results*.json
 data/
 docs/SPRINT_*
+site/
+
+# Cloudflare worker local artifacts
+cloudflare/remote-registry-worker/node_modules/
+cloudflare/remote-registry-worker/.wrangler/
+cloudflare/remote-registry-worker/wrangler.jsonc
+cloudflare/remote-registry-worker/package-lock.json

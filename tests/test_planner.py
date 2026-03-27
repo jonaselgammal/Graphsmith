@@ -19,6 +19,7 @@ from graphsmith.planner import (
 )
 from graphsmith.planner.backend import PlannerBackend
 from graphsmith.planner.composer import glue_to_skill_package
+from graphsmith.planner.policy import derive_goal_constraints
 from graphsmith.planner.prompt import build_planning_context
 from graphsmith.registry import LocalRegistry
 from graphsmith.registry.index import IndexEntry
@@ -88,6 +89,47 @@ class TestCandidateRetrieval:
         a = retrieve_candidates("text review", reg_with_skills)
         b = retrieve_candidates("text review", reg_with_skills)
         assert [c.id for c in a] == [c.id for c in b]
+
+    def test_filters_to_trusted_published_skills(self) -> None:
+        class StubRegistry:
+            root = Path("/tmp/stub")
+
+            def list_all(self):
+                return [
+                    IndexEntry(
+                        id="text.contains.v1",
+                        name="Contains",
+                        version="1.0.0",
+                        description="Check whether text contains a phrase.",
+                        tags=["text", "contains"],
+                        input_names=["text", "phrase"],
+                        output_names=["result"],
+                        published_at="2026-03-27T00:00:00Z",
+                        source_kind="remote",
+                        trust_score=0.8,
+                    ),
+                    IndexEntry(
+                        id="text.starts_with.v1",
+                        name="Starts With",
+                        version="1.0.0",
+                        description="Check whether text starts with a prefix.",
+                        tags=["text", "prefix"],
+                        input_names=["text", "prefix"],
+                        output_names=["result"],
+                        published_at="2026-03-27T00:00:00Z",
+                        source_kind="remote",
+                        trust_score=0.4,
+                    ),
+                ]
+
+            def search(self, query, **kwargs):
+                return [e for e in self.list_all() if e.matches_text(query)]
+
+        candidates = retrieve_candidates(
+            "Using only trusted published skills, check whether text contains a phrase",
+            StubRegistry(),
+        )
+        assert [c.id for c in candidates] == ["text.contains.v1"]
 
 
 # ── mock backend ─────────────────────────────────────────────────────
@@ -191,6 +233,13 @@ class TestPromptBuilder:
         )
         ctx = build_planning_context(request)
         assert "no network" in ctx
+
+    def test_derives_goal_policy_constraints(self) -> None:
+        constraints = derive_goal_constraints(
+            "Using only trusted published skills, check whether text contains a phrase",
+        )
+        assert constraints
+        assert any("trusted published skills" in c for c in constraints)
 
 
 # ── composer (end-to-end) ────────────────────────────────────────────

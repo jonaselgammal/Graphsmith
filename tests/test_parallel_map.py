@@ -91,6 +91,28 @@ class TestParallelMap:
             ]
         }
 
+    def test_skill_invoke_can_aggregate_named_outputs(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "text.normalize.v1")
+
+        result = parallel_map(
+            {
+                "op": "skill.invoke",
+                "item_input": "text",
+                "aggregate_outputs": True,
+                "op_config": {"skill_id": "text.normalize.v1", "version": "1.0.0"},
+            },
+            {"items": ["  Alice ", "Bob  "]},
+            registry=reg,
+        )
+        assert result == {
+            "results": [
+                {"normalized": "alice"},
+                {"normalized": "bob"},
+            ],
+            "normalized": ["alice", "bob"],
+        }
+
     def test_nested_parallel_map_rejected(self) -> None:
         with pytest.raises(OpError, match="does not support nesting"):
             parallel_map({"op": "parallel.map"}, {"items": []})

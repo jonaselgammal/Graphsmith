@@ -1,0 +1,10 @@
+{
+  "id": "s07",
+  "goal": "Using only already published skills, parse this JSON, extract the value field, and check whether it contains a phrase",
+  "tier": 3,
+  "tags": ["remote", "policy", "published_only"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["semantic_fidelity_blocked", "replan_failed", "missing_skill_not_detected"],
+  "notes": "Policy probe for published-only remote reuse."
+}
+

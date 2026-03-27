@@ -1,0 +1,10 @@
+{
+  "id": "s11",
+  "goal": "Read a Python file, extract all function names, sort them, and return them as pretty JSON",
+  "tier": 4,
+  "tags": ["filesystem", "programming", "json", "boundary"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["missing_skill_not_detected", "semantic_fidelity_blocked", "replan_failed"],
+  "notes": "General programming task with filesystem and language parsing requirements."
+}
+
