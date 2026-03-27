@@ -313,6 +313,108 @@ class TestRunGlueGraph:
         ]
         assert provider.calls == 1
 
+    def test_runtime_repairs_nested_synthesized_loop_region(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        ir = PlanningIR(
+            goal="format each item",
+            inputs=[IRInput(name="items", type="array<string>")],
+            steps=[],
+            blocks=[
+                IRBlock(
+                    name="format_each",
+                    kind="loop",
+                    collection=IRSource(step="input", port="items"),
+                    inputs={"text": IRSource(binding="item")},
+                    steps=[
+                        IRStep(
+                            name="render",
+                            skill_id="template.render",
+                            sources={"text": IRSource(step="input", port="text")},
+                            config={"template": "{{text}}"},
+                        )
+                    ],
+                    final_outputs={"rendered": IROutputRef(step="render", port="rendered")},
+                    max_items=10,
+                )
+            ],
+            final_outputs={"rendered": IROutputRef(step="format_each", port="rendered")},
+            effects=["pure"],
+        )
+        synth_glue = compile_ir(ir)
+        broken_node = synth_glue.graph.nodes[0]
+        broken_config = dict(broken_node.config)
+        broken_config["item_inputs"] = ["missing"]
+        synth_pkg_dir = write_package(
+            tmp_path / "synth_pkg",
+            skill={
+                "id": "synth.format_each.v1",
+                "name": "Synth Format Each",
+                "version": "1.0.0",
+                "description": "format each item",
+                "inputs": [{"name": "items", "type": "array<string>", "required": True}],
+                "outputs": [{"name": "rendered", "type": "array<string>"}],
+                "effects": ["pure"],
+                "tags": ["synthesized", "subgraph"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [broken_node.model_copy(update={"config": broken_config}).model_dump(mode="json", by_alias=True)],
+                "edges": [edge.model_dump(mode="json", by_alias=True) for edge in synth_glue.graph.edges],
+                "outputs": dict(synth_glue.graph.outputs),
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(synth_pkg_dir)
+
+        outer_glue = GlueGraph(
+            goal="call synthesized loop",
+            inputs=[IOField(name="items", type="array<string>")],
+            outputs=[IOField(name="rendered", type="array<string>")],
+            effects=["pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="invoke_loop",
+                        op="skill.invoke",
+                        config={"skill_id": "synth.format_each.v1", "version": "1.0.0"},
+                    )
+                ],
+                edges=[{"from": "input.items", "to": "invoke_loop.items"}],
+                outputs={"rendered": "invoke_loop.rendered"},
+            ),
+        )
+
+        repaired_block = json.dumps({"block": ir.blocks[0].model_dump(mode="json")})
+
+        class RepairProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: Any) -> str:
+                self.calls += 1
+                return repaired_block
+
+        provider = RepairProvider()
+        exec_result = run_glue_graph(
+            outer_glue,
+            {"items": ["a", "b"]},
+            llm_provider=provider,  # type: ignore[arg-type]
+            registry=reg,
+        )
+        assert exec_result.outputs == {"rendered": ["a", "b"]}
+        assert "runtime:format_each: regenerated loop region from runtime trace" in exec_result.repairs
+        swap_actions = [
+            action for action in exec_result.repairs
+            if action.startswith("runtime:invoke_loop: swapped repaired nested skill ")
+        ]
+        assert len(swap_actions) == 1
+        repaired_entries = [entry for entry in reg.list_all() if entry.id.startswith("repair.synth_format_each_v1_")]
+        assert len(repaired_entries) == 1
+        repaired_pkg = reg.fetch(repaired_entries[0].id, repaired_entries[0].version)
+        assert repaired_pkg.graph.nodes[0].config.get("item_inputs") != ["missing"]
+        assert provider.calls == 1
+
     def test_normalizes_nested_parallel_map_skill_target(self, tmp_path: Path) -> None:
         reg = LocalRegistry(root=tmp_path / "reg")
         reg.publish(EXAMPLE_DIR / "text.normalize.v1")
