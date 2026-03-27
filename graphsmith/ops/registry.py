@@ -21,6 +21,7 @@ from graphsmith.ops.text_ops import (
     text_sort_lines,
     text_remove_duplicates,
     text_title_case,
+    text_equals,
 )
 
 # Ops that need no external provider
@@ -39,6 +40,7 @@ _PURE_OPS: dict[str, Any] = {
     "text.sort_lines": text_sort_lines,
     "text.remove_duplicates": text_remove_duplicates,
     "text.title_case": text_title_case,
+    "text.equals": text_equals,
 }
 
 

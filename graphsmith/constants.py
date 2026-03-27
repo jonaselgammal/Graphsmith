@@ -19,6 +19,7 @@ PRIMITIVE_OPS = {
     "text.sort_lines",
     "text.remove_duplicates",
     "text.title_case",
+    "text.equals",
 }
 
 ALLOWED_TYPES: set[str] = {

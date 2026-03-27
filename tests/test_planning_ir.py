@@ -747,6 +747,21 @@ class TestIRParser:
         assert ir.steps[0].when.port == "enabled"
         assert ir.steps[0].unless is True
 
+    def test_invalid_step_sources_type_raises_parse_error(self) -> None:
+        data = {
+            "inputs": [{"name": "text"}],
+            "steps": [
+                {
+                    "name": "call",
+                    "skill_id": "text.summarize.v1",
+                    "sources": [],
+                }
+            ],
+            "final_outputs": {"summary": {"step": "call", "port": "summary"}},
+        }
+        with pytest.raises(IRParseError, match="step.sources must be an object"):
+            parse_ir_output(json.dumps(data), goal="test")
+
     def test_roundtrip_parse_compile(self) -> None:
         """Parse IR from JSON, compile to GlueGraph, validate."""
         data = {

@@ -1,4 +1,4 @@
-"""Pure text ops: normalize, word_count, reverse, sort_lines, remove_duplicates, title_case."""
+"""Pure text ops: normalize, word_count, reverse, sort_lines, remove_duplicates, title_case, equals."""
 from __future__ import annotations
 
 import re
@@ -94,3 +94,14 @@ def text_title_case(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str,
     if text is None:
         raise OpError("text.title_case requires input 'text'")
     return {"titled": str(text).title()}
+
+
+def text_equals(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    """Return whether two text values are equal."""
+    text = inputs.get("text")
+    other = inputs.get("other")
+    if text is None:
+        raise OpError("text.equals requires input 'text'")
+    if other is None:
+        raise OpError("text.equals requires input 'other'")
+    return {"result": str(text) == str(other)}

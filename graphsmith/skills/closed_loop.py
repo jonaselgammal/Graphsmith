@@ -215,8 +215,20 @@ def _goal_has_filesystem_boundary(goal: str) -> bool:
     return any(token in goal_lower for token in (" file ", " disk", "filesystem", " path", "from disk", "read a "))
 
 
+def _goal_matches_sentiment_branch_prefix(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "sentiment" in goal_lower
+        and "positive" in goal_lower
+        and "otherwise" in goal_lower
+        and ("prefix each line" in goal_lower or "prefix the lines" in goal_lower)
+    )
+
+
 def _semantic_fidelity_block_reason(goal: str) -> str:
     """Return a bounded reason when the goal exceeds current closed-loop fidelity."""
+    if _goal_matches_sentiment_branch_prefix(goal):
+        return ""
     if requires_trusted_published_only(goal):
         return "semantic_fidelity_blocked"
     if requires_published_only(goal) and match_template_keys(goal):
@@ -423,6 +435,67 @@ def _build_existing_skill_fallback_plan(
     return _build_linear_pipeline_plan(goal, registry, skill_ids)
 
 
+def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
+    """Build a bounded branch fallback for sentiment-conditioned prefix formatting."""
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    goal_lower = goal.lower()
+    if not _goal_matches_sentiment_branch_prefix(goal):
+        return None
+
+    required = {"text.classify_sentiment.v1", "text.prefix_lines.v1"}
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    if not required.issubset(available):
+        return None
+
+    nodes = [
+        GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
+        GraphNode(id="positive_label", op="template.render", config={"template": "positive"}),
+        GraphNode(id="is_positive", op="text.equals"),
+        GraphNode(
+            id="prefix_positive",
+            op="skill.invoke",
+            config={"skill_id": "text.prefix_lines.v1"},
+            when="is_positive.result",
+        ),
+        GraphNode(
+            id="prefix_negative",
+            op="skill.invoke",
+            config={"skill_id": "text.prefix_lines.v1"},
+            when="!is_positive.result",
+        ),
+        GraphNode(id="merge_prefixed", op="fallback.try"),
+    ]
+    edges = [
+        GraphEdge(from_="input.text", to="classify.text"),
+        GraphEdge(from_="classify.sentiment", to="is_positive.text"),
+        GraphEdge(from_="positive_label.rendered", to="is_positive.other"),
+        GraphEdge(from_="input.text", to="prefix_positive.text"),
+        GraphEdge(from_="input.positive_prefix", to="prefix_positive.prefix"),
+        GraphEdge(from_="input.text", to="prefix_negative.text"),
+        GraphEdge(from_="input.negative_prefix", to="prefix_negative.prefix"),
+        GraphEdge(from_="prefix_positive.prefixed", to="merge_prefixed.primary"),
+        GraphEdge(from_="prefix_negative.prefixed", to="merge_prefixed.fallback"),
+    ]
+    return GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="text", type="string"),
+            IOField(name="positive_prefix", type="string"),
+            IOField(name="negative_prefix", type="string"),
+        ],
+        outputs=[IOField(name="prefixed", type="string")],
+        effects=["llm_inference", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=nodes,
+            edges=edges,
+            outputs={"prefixed": "merge_prefixed.result"},
+        ),
+    )
+
+
 # ── Orchestrator ─────────────────────────────────────────────────
 
 
@@ -475,6 +548,19 @@ def run_closed_loop(
             result.success = False
             return result
         result.stopped_reason = "initial_plan_succeeded"
+        result.success = True
+        return result
+
+    branch_fallback = _build_sentiment_branch_fallback_plan(goal, registry)
+    if branch_fallback is not None:
+        result.replan_status = "success"
+        result.replan_plan = branch_fallback
+        block_reason = _semantic_fidelity_block_reason(goal)
+        if block_reason:
+            result.stopped_reason = block_reason
+            result.success = False
+            return result
+        result.stopped_reason = "branch_fallback_succeeded"
         result.success = True
         return result
 

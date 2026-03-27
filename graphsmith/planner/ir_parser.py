@@ -118,8 +118,11 @@ def _build_ir(data: dict[str, Any], *, goal: str) -> PlanningIR:
     steps: list[IRStep] = []
     step_names: set[str] = set()
     for s in data["steps"]:
+        raw_sources = s.get("sources", {})
+        if not isinstance(raw_sources, dict):
+            raise ValueError("step.sources must be an object")
         sources: dict[str, IRSource] = {}
-        for port, src in s.get("sources", {}).items():
+        for port, src in raw_sources.items():
             sources[port] = _normalize_source(src)
         name = s["name"]
         step_names.add(name)
@@ -159,6 +162,9 @@ def _build_block(block: dict[str, Any]) -> IRBlock:
     block_step_names = {step.name for step in block_steps}
     then_steps = [_build_step(step) for step in block.get("then_steps", [])]
     else_steps = [_build_step(step) for step in block.get("else_steps", [])]
+    raw_inputs = block.get("inputs", {})
+    if not isinstance(raw_inputs, dict):
+        raise ValueError("block.inputs must be an object")
     return IRBlock(
         name=block["name"],
         kind=block["kind"],
@@ -166,7 +172,7 @@ def _build_block(block: dict[str, Any]) -> IRBlock:
         collection=_normalize_source(block["collection"]) if block.get("collection") is not None else None,
         inputs={
             port: _normalize_source(src)
-            for port, src in block.get("inputs", {}).items()
+            for port, src in raw_inputs.items()
         },
         steps=block_steps,
         then_steps=then_steps,

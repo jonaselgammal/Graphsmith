@@ -846,6 +846,47 @@ class TestClosedLoopOrchestration:
             "text.join_lines.v1",
         ]
 
+    def test_branch_fallback_succeeds_for_sentiment_prefixing(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Classify the sentiment of this text and, if it is positive, prefix each line with a plus sign, otherwise prefix each line with a minus sign",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "branch_fallback_succeeded"
+        assert result.replan_plan is not None
+        ids = [node.id for node in result.replan_plan.graph.nodes]
+        assert "classify" in ids
+        assert "is_positive" in ids
+        assert "prefix_positive" in ids
+        assert "prefix_negative" in ids
+        assert "merge_prefixed" in ids
+        node_map = {node.id: node for node in result.replan_plan.graph.nodes}
+        assert node_map["prefix_positive"].when == "is_positive.result"
+        assert node_map["prefix_negative"].when == "!is_positive.result"
+
 
 # ── Format output ────────────────────────────────────────────────
 
