@@ -4,6 +4,6 @@
   "tier": 2,
   "tags": ["text", "llm", "multi_generated", "boundary"],
   "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed"],
+  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed", "semantic_fidelity_blocked"],
   "notes": "Two generated capabilities after an LLM step."
 }

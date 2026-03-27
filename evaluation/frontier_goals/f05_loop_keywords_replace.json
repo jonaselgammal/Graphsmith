@@ -4,6 +4,6 @@
   "tier": 2,
   "tags": ["loop", "text", "llm", "generated"],
   "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed"],
+  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed", "semantic_fidelity_blocked"],
   "notes": "Loop plus generated transform after an LLM extraction."
 }

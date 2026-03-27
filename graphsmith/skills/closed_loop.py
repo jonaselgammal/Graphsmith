@@ -196,6 +196,22 @@ def _goal_needs_multiple_generated_skills(goal: str) -> bool:
     return len(match_template_keys(goal)) > 1
 
 
+def _goal_has_filesystem_boundary(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return any(token in goal_lower for token in (" file ", " disk", "filesystem", " path", "from disk", "read a "))
+
+
+def _semantic_fidelity_block_reason(goal: str) -> str:
+    """Return a bounded reason when the goal exceeds current closed-loop fidelity."""
+    if _goal_needs_multiple_generated_skills(goal):
+        return "semantic_fidelity_blocked"
+    if _goal_has_loop_semantics(goal) and match_template_keys(goal):
+        return "semantic_fidelity_blocked"
+    if _goal_has_filesystem_boundary(goal):
+        return "semantic_fidelity_blocked"
+    return ""
+
+
 def _build_single_skill_plan(goal: str, spec: SkillSpec) -> GlueGraph:
     """Build a deterministic one-node plan for a generated skill."""
     from graphsmith.models.common import IOField
@@ -402,6 +418,11 @@ def run_closed_loop(
     result.initial_plan = plan_result.graph
 
     if plan_result.status == "success" and plan_result.graph is not None:
+        block_reason = _semantic_fidelity_block_reason(goal)
+        if block_reason:
+            result.stopped_reason = block_reason
+            result.success = False
+            return result
         result.stopped_reason = "initial_plan_succeeded"
         result.success = True
         return result
@@ -431,12 +452,22 @@ def run_closed_loop(
         result.replan_status = retry_result.status
         result.replan_plan = retry_result.graph
         if retry_result.status == "success" and retry_result.graph is not None:
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
             result.stopped_reason = "existing_skill_replan_succeeded"
             result.success = True
             return result
         if exact_spec is not None and not _is_multi_stage_goal(goal):
             result.replan_status = "success"
             result.replan_plan = _build_single_skill_plan(goal, exact_spec)
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
             result.stopped_reason = "single_skill_fallback_succeeded"
             result.success = True
             return result
@@ -445,6 +476,11 @@ def run_closed_loop(
             if fallback_graph is not None:
                 result.replan_status = "success"
                 result.replan_plan = fallback_graph
+                block_reason = _semantic_fidelity_block_reason(goal)
+                if block_reason:
+                    result.stopped_reason = block_reason
+                    result.success = False
+                    return result
                 result.stopped_reason = "multi_stage_fallback_succeeded"
                 result.success = True
                 return result
@@ -520,11 +556,21 @@ def run_closed_loop(
         result.replan_plan = replan_result.graph
         result.success = replan_result.status == "success" and replan_result.graph is not None
         if result.success:
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
             result.stopped_reason = "replan_succeeded"
             return result
         if not _is_multi_stage_goal(goal):
             result.replan_status = "success"
             result.replan_plan = _build_single_skill_plan(goal, spec)
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
             result.stopped_reason = "single_skill_fallback_succeeded"
             result.success = True
             return result
@@ -532,6 +578,11 @@ def run_closed_loop(
         if fallback_graph is not None:
             result.replan_status = "success"
             result.replan_plan = fallback_graph
+            block_reason = _semantic_fidelity_block_reason(goal)
+            if block_reason:
+                result.stopped_reason = block_reason
+                result.success = False
+                return result
             result.stopped_reason = "multi_stage_fallback_succeeded"
             result.success = True
             return result

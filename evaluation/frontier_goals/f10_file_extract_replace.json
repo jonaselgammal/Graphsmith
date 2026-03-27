@@ -4,6 +4,6 @@
   "tier": 3,
   "tags": ["filesystem", "json", "text", "boundary"],
   "expected_success": false,
-  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed"],
+  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed", "semantic_fidelity_blocked"],
   "notes": "Filesystem boundary plus generated transform."
 }
