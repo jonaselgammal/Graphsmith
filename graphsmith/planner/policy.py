@@ -28,6 +28,14 @@ def requires_trusted_published_only(goal: str) -> bool:
     return _requires_trusted_published_only(goal.lower())
 
 
+def is_published_entry(entry: IndexEntry) -> bool:
+    return _entry_is_published(entry)
+
+
+def is_trusted_published_entry(entry: IndexEntry) -> bool:
+    return _entry_is_trusted_published(entry)
+
+
 def filter_candidates_by_goal_policy(
     entries: list[IndexEntry],
     goal: str,

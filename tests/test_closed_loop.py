@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from graphsmith.planner.candidates import retrieve_candidates
 from graphsmith.planner.ir_backend import CandidateResult
 from graphsmith.planner.models import GlueGraph, PlanResult, UnresolvedHole
+from graphsmith.registry import AggregatedRegistry, FileRemoteRegistry, LocalRegistry
 from graphsmith.skills.autogen import AutogenError, extract_spec
 from graphsmith.skills.closed_loop import (
     ClosedLoopResult,
@@ -19,6 +20,7 @@ from graphsmith.skills.closed_loop import (
     format_closed_loop_result,
     run_closed_loop,
 )
+from conftest import minimal_examples, write_package
 
 
 # ── Missing-skill detection ──────────────────────────────────────
@@ -104,8 +106,6 @@ class TestClosedLoopOrchestration:
 
     def _make_registry_without(self, exclude_skills: set[str] | None = None) -> tuple:
         """Build a registry excluding specific skills."""
-        from graphsmith.registry.local import LocalRegistry
-
         exclude = exclude_skills or set()
         reg_dir = tempfile.mkdtemp()
         reg = LocalRegistry(reg_dir)
@@ -374,6 +374,169 @@ class TestClosedLoopOrchestration:
         node = second.replan_plan.graph.nodes[0]
         assert node.op == "skill.invoke"
         assert node.config["skill_id"] == workflow_id
+
+    def test_untrusted_remote_synthesized_workflow_is_not_reused(self, tmp_path: Path) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        local_reg, _ = self._make_registry_without()
+        remote_reg = FileRemoteRegistry(
+            root=tmp_path / "remote",
+            registry_id="low-trust-remote",
+            registry_url="https://skills.example.test",
+            owner="graphsmith-tests",
+            trust_score=0.4,
+        )
+        workflow_dir = write_package(
+            tmp_path / "remote_workflow_pkg",
+            skill={
+                "id": "synth.remote_file_transform_write_pytest.v1",
+                "name": "Remote File Workflow",
+                "version": "1.0.0",
+                "description": "remote workflow",
+                "inputs": [
+                    {"name": "input_path", "type": "string", "required": True},
+                    {"name": "output_path", "type": "string", "required": True},
+                    {"name": "cwd", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "stdout", "type": "string"}],
+                "effects": ["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                "tags": [
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "coding", "environment", "filesystem", "pytest",
+                    "workflow", "workflow:file_transform_write_pytest", "transform:title_case",
+                ],
+            },
+            graph={
+                "version": 1,
+                "nodes": [
+                    {"id": "in_path_token", "op": "template.render", "config": {"template": "{{input_path}}"}},
+                    {"id": "out_path_token", "op": "template.render", "config": {"template": "{{output_path}}"}},
+                    {"id": "stdout_token", "op": "template.render", "config": {"template": "{{cwd}}"}},
+                ],
+                "edges": [
+                    {"from": "input.input_path", "to": "in_path_token.input_path"},
+                    {"from": "input.output_path", "to": "out_path_token.output_path"},
+                    {"from": "input.cwd", "to": "stdout_token.cwd"},
+                ],
+                "outputs": {"stdout": "stdout_token.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        remote_reg.publish(workflow_dir)
+        agg = AggregatedRegistry(local_reg, [remote_reg])
+
+        result = run_closed_loop(
+            "Read a file, title case it, write it to a new file, and then run pytest in the project",
+            FailBackend(),
+            agg,
+            output_dir=tmp_path / "out",
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.replan_plan is not None
+        assert len(result.replan_plan.graph.nodes) == 2
+        used_ids = {
+            node.config["skill_id"]
+            for node in result.replan_plan.graph.nodes
+            if isinstance(node.config, dict)
+        }
+        assert "synth.remote_file_transform_write_pytest.v1" not in used_ids
+
+    def test_trusted_remote_synthesized_workflow_can_be_reused(self, tmp_path: Path) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        local_reg, _ = self._make_registry_without()
+        remote_reg = FileRemoteRegistry(
+            root=tmp_path / "remote",
+            registry_id="trusted-remote",
+            registry_url="https://skills.example.test",
+            owner="graphsmith-tests",
+            trust_score=0.9,
+        )
+        workflow_dir = write_package(
+            tmp_path / "trusted_remote_workflow_pkg",
+            skill={
+                "id": "synth.remote_file_transform_write_pytest.v1",
+                "name": "Remote File Workflow",
+                "version": "1.0.0",
+                "description": "remote workflow",
+                "inputs": [
+                    {"name": "input_path", "type": "string", "required": True},
+                    {"name": "output_path", "type": "string", "required": True},
+                    {"name": "cwd", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "stdout", "type": "string"}],
+                "effects": ["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                "tags": [
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "coding", "environment", "filesystem", "pytest",
+                    "workflow", "workflow:file_transform_write_pytest", "transform:title_case",
+                ],
+            },
+            graph={
+                "version": 1,
+                "nodes": [
+                    {"id": "in_path_token", "op": "template.render", "config": {"template": "{{input_path}}"}},
+                    {"id": "out_path_token", "op": "template.render", "config": {"template": "{{output_path}}"}},
+                    {"id": "stdout_token", "op": "template.render", "config": {"template": "{{cwd}}"}},
+                ],
+                "edges": [
+                    {"from": "input.input_path", "to": "in_path_token.input_path"},
+                    {"from": "input.output_path", "to": "out_path_token.output_path"},
+                    {"from": "input.cwd", "to": "stdout_token.cwd"},
+                ],
+                "outputs": {"stdout": "stdout_token.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        remote_reg.publish(workflow_dir)
+        agg = AggregatedRegistry(local_reg, [remote_reg])
+
+        result = run_closed_loop(
+            "Read a file, title case it, write it to a new file, and then run pytest in the project",
+            FailBackend(),
+            agg,
+            output_dir=tmp_path / "out",
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.replan_plan is not None
+        assert len(result.replan_plan.graph.nodes) == 1
+        node = result.replan_plan.graph.nodes[0]
+        assert node.op == "skill.invoke"
+        assert node.config["skill_id"] == "synth.remote_file_transform_write_pytest.v1"
 
     def test_mixed_environment_workflow_composes_reused_workflow_and_formatter(self) -> None:
         class FailBackend:

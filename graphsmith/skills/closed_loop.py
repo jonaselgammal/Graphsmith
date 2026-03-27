@@ -23,6 +23,8 @@ from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult
 from graphsmith.planner.policy import (
     derive_goal_constraints,
     filter_candidates_by_goal_policy,
+    is_published_entry,
+    is_trusted_published_entry,
     requires_published_only,
     requires_trusted_published_only,
 )
@@ -1180,6 +1182,7 @@ def _build_file_transform_write_then_pytest_plan(
         return None, []
 
     reusable_workflow = _find_reusable_synthesized_skill(
+        goal,
         registry,
         required_inputs={"input_path", "output_path", "cwd"},
         required_outputs={"stdout"},
@@ -1344,6 +1347,7 @@ def _build_file_transform_write_then_pytest_prefix_plan(
     decomp = decompose_deterministic(goal)
     transform = decomp.content_transforms[0]
     workflow_entry = _find_reusable_synthesized_skill(
+        goal,
         registry,
         required_inputs={"input_path", "output_path", "cwd"},
         required_outputs={"stdout"},
@@ -1360,6 +1364,7 @@ def _build_file_transform_write_then_pytest_prefix_plan(
         )
         refs.extend(workflow_refs)
         workflow_entry = _find_reusable_synthesized_skill(
+            goal,
             registry,
             required_inputs={"input_path", "output_path", "cwd"},
             required_outputs={"stdout"},
@@ -1684,6 +1689,7 @@ def _build_single_skill_invoke_plan(
 
 
 def _find_reusable_synthesized_skill(
+    goal: str,
     registry: RegistryBackend,
     *,
     required_inputs: set[str],
@@ -1700,6 +1706,12 @@ def _find_reusable_synthesized_skill(
     for entry in registry.list_all():
         if not entry.id.startswith("synth."):
             continue
+        if not _reusable_synthesized_entry_allowed(
+            entry,
+            goal,
+            required_effects=required_effects,
+        ):
+            continue
         if not required_inputs.issubset(set(entry.required_input_names)):
             continue
         if not required_outputs.issubset(set(entry.output_names)):
@@ -1713,6 +1725,36 @@ def _find_reusable_synthesized_skill(
         return None
     matches.sort(key=lambda entry: (entry.id, entry.version))
     return matches[0]
+
+
+def _reusable_synthesized_entry_allowed(
+    entry: IndexEntry,
+    goal: str,
+    *,
+    required_effects: set[str],
+) -> bool:
+    """Conservative policy gate for reusing synthesized skills."""
+    tags = set(entry.tags)
+    if not {"synthesized", "subgraph", "closed-loop", "validated"}.issubset(tags):
+        return False
+    if entry.source_kind == "remote":
+        if not is_trusted_published_entry(entry):
+            return False
+        # Require explicit provenance for remote synthesized reuse.
+        if not entry.remote_ref:
+            return False
+    elif requires_trusted_published_only(goal):
+        return False
+    elif requires_published_only(goal) and not is_published_entry(entry):
+        return False
+
+    # Effectful synthesized workflows are only reused when their tags make the
+    # capability class explicit.
+    if required_effects & {"filesystem_read", "filesystem_write", "shell_exec"}:
+        if not {"coding", "environment"}.issubset(tags):
+            return False
+
+    return True
 
 
 def _materialize_subgraph_skill(
@@ -1758,7 +1800,14 @@ def _materialize_subgraph_skill(
             inputs=graph.inputs,
             outputs=graph.outputs,
             effects=graph.effects,
-            tags=sorted(set(["synthesized", "subgraph", "closed-loop", *(extra_tags or [])])),
+            tags=sorted(set([
+                "synthesized",
+                "subgraph",
+                "closed-loop",
+                "validated",
+                *(["smoke_tested"] if smoke_test else []),
+                *(extra_tags or []),
+            ])),
             authors=["graphsmith"],
         ),
         graph=pkg.graph,
