@@ -594,6 +594,9 @@ def _runtime_region_node_ids(glue: GlueGraph, block_name: str, kind: str) -> set
         f"{block_name}__then__",
         f"{block_name}__else__",
         f"{block_name}__merge__",
+        f"{block_name}_then_",
+        f"{block_name}_else_",
+        f"{block_name}_merge_",
     )
     return {
         node.id for node in glue.graph.nodes

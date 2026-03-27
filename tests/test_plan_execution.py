@@ -415,6 +415,107 @@ class TestRunGlueGraph:
         assert repaired_pkg.graph.nodes[0].config.get("item_inputs") != ["missing"]
         assert provider.calls == 1
 
+    def test_runtime_repairs_branch_region_from_trace(self, tmp_path: Path) -> None:
+        reg = LocalRegistry(root=tmp_path / "reg")
+        reg.publish(EXAMPLE_DIR / "dev.run_pytest.v1")
+        reg.publish(EXAMPLE_DIR / "text.prefix_lines.v1")
+
+        project = Path.cwd() / ".tmp_branch_region_project"
+        project.mkdir(exist_ok=True)
+        (project / "test_ok.py").write_text(
+            "def test_ok():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+        ir = PlanningIR(
+            goal="run pytest and prefix output by status",
+            inputs=[IRInput(name="cwd", type="string")],
+            steps=[
+                IRStep(
+                    name="pytest",
+                    skill_id="dev.run_pytest.v1",
+                    sources={"cwd": IRSource(step="input", port="cwd")},
+                ),
+                IRStep(name="zero", skill_id="template.render", config={"template": "0"}),
+                IRStep(
+                    name="is_success",
+                    skill_id="text.equals",
+                    sources={
+                        "text": IRSource(step="pytest", port="exit_code"),
+                        "other": IRSource(step="zero", port="rendered"),
+                    },
+                ),
+            ],
+            blocks=[
+                IRBlock(
+                    name="format_output",
+                    kind="branch",
+                    condition=IRSource(step="is_success", port="result"),
+                    inputs={"stdout": IRSource(step="pytest", port="stdout")},
+                    then_steps=[
+                        IRStep(name="pass_label", skill_id="template.render", config={"template": "PASS"}),
+                        IRStep(
+                            name="prefix_pass",
+                            skill_id="text.prefix_lines.v1",
+                            sources={
+                                "text": IRSource(step="input", port="stdout"),
+                                "prefix": IRSource(step="pass_label", port="rendered"),
+                            },
+                        ),
+                    ],
+                    else_steps=[
+                        IRStep(name="fail_label", skill_id="template.render", config={"template": "FAIL"}),
+                        IRStep(
+                            name="prefix_fail",
+                            skill_id="text.prefix_lines.v1",
+                            sources={
+                                "text": IRSource(step="input", port="stdout"),
+                                "prefix": IRSource(step="fail_label", port="rendered"),
+                            },
+                        ),
+                    ],
+                    then_outputs={"prefixed": IROutputRef(step="prefix_pass", port="prefixed")},
+                    else_outputs={"prefixed": IROutputRef(step="prefix_fail", port="prefixed")},
+                )
+            ],
+            final_outputs={"prefixed": IROutputRef(step="format_output", port="prefixed")},
+            effects=["shell_exec", "pure"],
+        )
+        glue = compile_ir(ir)
+
+        broken_edges = []
+        for edge in glue.graph.edges:
+            if edge.to == "format_output_then_prefix_pass.prefix":
+                broken_edges.append(edge.model_copy(update={"from_": "zero.missing"}))
+            else:
+                broken_edges.append(edge)
+        glue = glue.model_copy(
+            update={
+                "graph": glue.graph.model_copy(update={"edges": broken_edges}),
+            }
+        )
+
+        repaired_block = json.dumps({"block": ir.blocks[0].model_dump(mode="json")})
+
+        class RepairProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: Any) -> str:
+                self.calls += 1
+                return repaired_block
+
+        provider = RepairProvider()
+        exec_result = run_glue_graph(
+            glue,
+            {"cwd": str(project)},
+            llm_provider=provider,  # type: ignore[arg-type]
+            registry=reg,
+        )
+        assert "PASS" in exec_result.outputs["prefixed"]
+        assert "runtime:format_output: regenerated branch region from runtime trace" in exec_result.repairs
+        assert provider.calls == 1
+
     def test_normalizes_nested_parallel_map_skill_target(self, tmp_path: Path) -> None:
         reg = LocalRegistry(root=tmp_path / "reg")
         reg.publish(EXAMPLE_DIR / "text.normalize.v1")

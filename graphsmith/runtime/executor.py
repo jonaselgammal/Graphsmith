@@ -173,16 +173,28 @@ def _execute_node(
     # Bindings sourced from optional graph inputs that were not provided
     # are silently skipped — the port is simply absent from resolved_inputs.
     resolved_inputs: dict[str, Any] = {}
-    for port, address in port_bindings.items():
-        if store.has(address):
-            resolved_inputs[port] = store.get(address)
-        elif address.startswith("input.") and address.split(".", 1)[1] in _optional:
-            continue  # optional input not provided — skip
-        elif address.split(".", 1)[0] in _skipped:
-            continue  # upstream node skipped — omit the input port
-        else:
-            # Force the error for required/non-input addresses
-            resolved_inputs[port] = store.get(address)
+    try:
+        for port, address in port_bindings.items():
+            if store.has(address):
+                resolved_inputs[port] = store.get(address)
+            elif address.startswith("input.") and address.split(".", 1)[1] in _optional:
+                continue  # optional input not provided — skip
+            elif address.split(".", 1)[0] in _skipped:
+                continue  # upstream node skipped — omit the input port
+            else:
+                # Force the error for required/non-input addresses
+                resolved_inputs[port] = store.get(address)
+    except ExecutionError as exc:
+        run_trace.nodes.append(NodeTrace(
+            node_id=node.id,
+            op=node.op,
+            status="error",
+            started_at=started,
+            ended_at=_now_iso(),
+            inputs_summary=_summarise(resolved_inputs),
+            error=str(exc),
+        ))
+        raise
 
     child_trace = None
     try:

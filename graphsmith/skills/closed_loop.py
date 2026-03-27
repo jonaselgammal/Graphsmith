@@ -916,53 +916,77 @@ def _build_run_pytest_plan(goal: str, registry: RegistryBackend) -> GlueGraph | 
 
 
 def _build_run_pytest_prefix_branch_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
-    from graphsmith.models.common import IOField
-    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
-
     available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
     if not {"dev.run_pytest.v1", "text.prefix_lines.v1"}.issubset(available):
         return None
-    return GlueGraph(
+
+    ir = PlanningIR(
         goal=goal,
-        inputs=[IOField(name="cwd", type="string")],
-        outputs=[IOField(name="prefixed", type="string")],
+        inputs=[IRInput(name="cwd", type="string")],
+        steps=[
+            IRStep(
+                name="pytest",
+                skill_id="dev.run_pytest.v1",
+                sources={"cwd": IRSource(step="input", port="cwd")},
+            ),
+            IRStep(
+                name="zero",
+                skill_id="template.render",
+                config={"template": "0"},
+            ),
+            IRStep(
+                name="is_success",
+                skill_id="text.equals",
+                sources={
+                    "text": IRSource(step="pytest", port="exit_code"),
+                    "other": IRSource(step="zero", port="rendered"),
+                },
+            ),
+        ],
+        blocks=[
+            IRBlock(
+                name="format_output",
+                kind="branch",
+                condition=IRSource(step="is_success", port="result"),
+                inputs={"stdout": IRSource(step="pytest", port="stdout")},
+                then_steps=[
+                    IRStep(
+                        name="pass_label",
+                        skill_id="template.render",
+                        config={"template": "PASS"},
+                    ),
+                    IRStep(
+                        name="prefix_pass",
+                        skill_id="text.prefix_lines.v1",
+                        sources={
+                            "text": IRSource(step="input", port="stdout"),
+                            "prefix": IRSource(step="pass_label", port="rendered"),
+                        },
+                    ),
+                ],
+                else_steps=[
+                    IRStep(
+                        name="fail_label",
+                        skill_id="template.render",
+                        config={"template": "FAIL"},
+                    ),
+                    IRStep(
+                        name="prefix_fail",
+                        skill_id="text.prefix_lines.v1",
+                        sources={
+                            "text": IRSource(step="input", port="stdout"),
+                            "prefix": IRSource(step="fail_label", port="rendered"),
+                        },
+                    ),
+                ],
+                then_outputs={"prefixed": IROutputRef(step="prefix_pass", port="prefixed")},
+                else_outputs={"prefixed": IROutputRef(step="prefix_fail", port="prefixed")},
+            )
+        ],
+        final_outputs={"prefixed": IROutputRef(step="format_output", port="prefixed")},
         effects=["shell_exec", "pure"],
-        graph=GraphBody(
-            version=1,
-            nodes=[
-                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
-                GraphNode(id="zero", op="template.render", config={"template": "0"}),
-                GraphNode(id="is_success", op="text.equals"),
-                GraphNode(id="pass_label", op="template.render", config={"template": "PASS"}),
-                GraphNode(id="fail_label", op="template.render", config={"template": "FAIL"}),
-                GraphNode(
-                    id="prefix_pass",
-                    op="skill.invoke",
-                    config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
-                    when="is_success.result",
-                ),
-                GraphNode(
-                    id="prefix_fail",
-                    op="skill.invoke",
-                    config={"skill_id": "text.prefix_lines.v1", "version": "1.0.0"},
-                    when="!is_success.result",
-                ),
-                GraphNode(id="merge_prefixed", op="fallback.try"),
-            ],
-            edges=[
-                GraphEdge(from_="input.cwd", to="pytest.cwd"),
-                GraphEdge(from_="pytest.exit_code", to="is_success.text"),
-                GraphEdge(from_="zero.rendered", to="is_success.other"),
-                GraphEdge(from_="pytest.stdout", to="prefix_pass.text"),
-                GraphEdge(from_="pass_label.rendered", to="prefix_pass.prefix"),
-                GraphEdge(from_="pytest.stdout", to="prefix_fail.text"),
-                GraphEdge(from_="fail_label.rendered", to="prefix_fail.prefix"),
-                GraphEdge(from_="prefix_pass.prefixed", to="merge_prefixed.primary"),
-                GraphEdge(from_="prefix_fail.prefixed", to="merge_prefixed.fallback"),
-            ],
-            outputs={"prefixed": "merge_prefixed.result"},
-        ),
     )
+    return compile_ir(ir)
 
 
 def _build_run_command_starts_with_plan(

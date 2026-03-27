@@ -160,6 +160,39 @@ class TestRuntimeErrors:
         with pytest.raises(ExecutionError, match="text too short"):
             run_skill_package(pkg, {"text": ""})
 
+    def test_binding_resolution_failure_records_error_trace(self, tmp_path: Path) -> None:
+        skill = {
+            "id": "test.binding_resolution_error.v1",
+            "name": "Binding Resolution Error",
+            "version": "1.0.0",
+            "description": "Fail during address resolution.",
+            "inputs": [{"name": "text", "type": "string", "required": True}],
+            "outputs": [{"name": "result", "type": "string"}],
+            "effects": ["pure"],
+        }
+        graph = {
+            "version": 1,
+            "nodes": [
+                {"id": "label", "op": "template.render", "config": {"template": "ok"}},
+                {"id": "broken", "op": "text.equals"},
+            ],
+            "edges": [
+                {"from": "input.text", "to": "broken.text"},
+                {"from": "label.missing", "to": "broken.other"},
+            ],
+            "outputs": {"result": "broken.result"},
+        }
+        write_package(tmp_path / "pkg", skill=skill, graph=graph, examples=minimal_examples())
+        pkg = _load_and_validate(tmp_path / "pkg")
+        with pytest.raises(ExecutionError, match="label.missing") as exc_info:
+            run_skill_package(pkg, {"text": "ok"})
+
+        trace = exc_info.value.trace
+        assert trace is not None
+        assert trace.nodes[-1].node_id == "broken"
+        assert trace.nodes[-1].status == "error"
+        assert "label.missing" in (trace.nodes[-1].error or "")
+
     def test_conflicting_bindings(self, tmp_path: Path) -> None:
         """Edge and node.inputs both bind the same port with different addresses."""
         skill = {
