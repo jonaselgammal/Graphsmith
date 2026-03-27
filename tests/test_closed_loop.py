@@ -417,6 +417,140 @@ class TestClosedLoopOrchestration:
         assert not result.success
         assert result.stopped_reason == "semantic_fidelity_blocked"
 
+    def test_structured_numeric_fallback_succeeds_for_median_divide_pretty_json(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 3
+            _use_decomposition = True
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                self._last_candidates = []
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without(exclude_skills={"text.word_count.v1"})
+        result = run_closed_loop(
+            "Compute the median of these numbers, divide it by another number, and pretty print the result as JSON",
+            AlwaysFailBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "structured_numeric_fallback_succeeded"
+        assert result.replan_plan is not None
+        skill_ids = [
+            node.config["skill_id"]
+            for node in result.replan_plan.graph.nodes
+            if node.op == "skill.invoke"
+        ]
+        assert "math.median.v1" in skill_ids
+        assert "math.divide.v1" in skill_ids
+        assert "json.pretty_print.v1" in skill_ids
+        assert "divisor" in {field.name for field in result.replan_plan.inputs}
+        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+
+    def test_structured_numeric_fallback_succeeds_for_multi_stat_json_contains(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 3
+            _use_decomposition = True
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                self._last_candidates = []
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without(exclude_skills={"text.word_count.v1"})
+        result = run_closed_loop(
+            "Compute the median and maximum of these numbers, format both values into readable JSON, and check whether the JSON contains a phrase",
+            AlwaysFailBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "structured_numeric_fallback_succeeded"
+        assert result.replan_plan is not None
+        skill_ids = [
+            node.config["skill_id"]
+            for node in result.replan_plan.graph.nodes
+            if node.op == "skill.invoke"
+        ]
+        assert "math.median.v1" in skill_ids
+        assert "math.max.v1" in skill_ids
+        assert "json.pretty_print.v1" in skill_ids
+        assert "text.contains.v1" in skill_ids
+        assert "substring" in {field.name for field in result.replan_plan.inputs}
+        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+
+    def test_structured_numeric_fallback_preempts_existing_pipeline_near_miss(self) -> None:
+        class NearMissBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+                return PlanResult(
+                    status="success",
+                    graph=GlueGraph(
+                        goal=request.goal,
+                        inputs=[IOField(name="raw_json", type="string")],
+                        outputs=[IOField(name="selected", type="string")],
+                        effects=["pure"],
+                        graph=GraphBody(
+                            version=1,
+                            nodes=[
+                                GraphNode(id="pretty", op="skill.invoke", config={"skill_id": "json.pretty_print.v1"}),
+                                GraphNode(id="reshape", op="skill.invoke", config={"skill_id": "json.reshape.v1"}),
+                            ],
+                            edges=[GraphEdge(from_="input.raw_json", to="pretty.raw_json")],
+                            outputs={"selected": "reshape.selected"},
+                        ),
+                    ),
+                )
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Compute the median of these numbers, divide it by another number, and pretty print the result as JSON",
+            NearMissBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "structured_numeric_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
+
     def test_user_decline_stops_loop(self) -> None:
         class AlwaysFailBackend:
             _candidate_count = 3
@@ -676,7 +810,7 @@ class TestClosedLoopOrchestration:
             "text.uppercase.v1",
         ]
 
-    def test_multi_stage_fallback_stays_off_for_non_text_chain(self) -> None:
+    def test_structured_numeric_fallback_handles_non_text_chain(self) -> None:
         class AlwaysFailBackend:
             _candidate_count = 1
             _use_decomposition = False
@@ -704,8 +838,10 @@ class TestClosedLoopOrchestration:
                 auto_approve=True,
             )
 
-        assert not result.success
-        assert result.stopped_reason == "replan_failed"
+        assert result.success
+        assert result.stopped_reason == "structured_numeric_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert any(node.op == "json.pack" for node in result.replan_plan.graph.nodes)
 
     def test_multi_stage_fallback_stays_off_for_loop_goal(self) -> None:
         class AlwaysFailBackend:

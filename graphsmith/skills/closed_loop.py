@@ -239,6 +239,28 @@ def _goal_supports_two_generated_linear_fallback(goal: str) -> bool:
     return keys == {"uppercase", "starts_with"}
 
 
+def _goal_supports_structured_numeric_fallback(goal: str) -> bool:
+    if _goal_has_loop_semantics(goal):
+        return False
+    if _goal_matches_sentiment_branch_prefix(goal):
+        return False
+    if _goal_has_filesystem_boundary(goal):
+        return False
+
+    keys = set(match_template_keys(goal))
+    allowed = {"median", "max", "min", "divide", "contains", "pretty"}
+    if not keys or not keys.issubset(allowed):
+        return False
+    numeric_keys = keys & {"median", "max", "min"}
+    if not numeric_keys:
+        return False
+    if "divide" in keys and len(numeric_keys) != 1:
+        return False
+
+    decomp = decompose_deterministic(goal)
+    return "pretty_print" in decomp.content_transforms
+
+
 def _goal_matches_sentiment_branch_prefix(goal: str) -> bool:
     goal_lower = goal.lower()
     return (
@@ -272,6 +294,8 @@ def _autogen_conflicts_with_existing_pipeline(goal: str, spec: SkillSpec) -> boo
 def _semantic_fidelity_block_reason(goal: str) -> str:
     """Return a bounded reason when the goal exceeds current closed-loop fidelity."""
     if _goal_matches_sentiment_branch_prefix(goal):
+        return ""
+    if _goal_supports_structured_numeric_fallback(goal):
         return ""
     if requires_trusted_published_only(goal):
         return "semantic_fidelity_blocked"
@@ -589,6 +613,104 @@ def _build_two_generated_linear_fallback_plan(
     return _build_linear_pipeline_plan(goal, registry, skill_ids)
 
 
+def _build_structured_numeric_fallback_plan(
+    goal: str,
+    registry: RegistryBackend,
+    generated_specs: list[SkillSpec],
+) -> GlueGraph | None:
+    """Build a bounded structured numeric plan.
+
+    Supported shape:
+    - one or two numeric reducers over `values`
+    - optional binary divide over a single reducer and a public `divisor`
+    - pack scalar outputs into JSON
+    - pretty print JSON
+    - optional contains over the formatted JSON
+    """
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    if not _goal_supports_structured_numeric_fallback(goal):
+        return None
+
+    spec_by_key = {spec.template_key: spec for spec in generated_specs}
+    goal_keys = match_template_keys(goal)
+    numeric_keys = [key for key in goal_keys if key in {"median", "max", "min"}]
+    if not numeric_keys:
+        return None
+
+    available_ids = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    required_skill_ids = ["json.pretty_print.v1"]
+    if "contains" in goal_keys:
+        required_skill_ids.append("text.contains.v1")
+    for skill_id in required_skill_ids:
+        if skill_id not in available_ids:
+            return None
+
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    inputs: list[IOField] = [IOField(name="values", type="string")]
+
+    scalar_ports: dict[str, str] = {}
+    for key in numeric_keys:
+        spec = spec_by_key.get(key)
+        if spec is None:
+            return None
+        node_id = key
+        nodes.append(GraphNode(id=node_id, op="skill.invoke", config={"skill_id": spec.skill_id}))
+        edges.append(GraphEdge(from_="input.values", to=f"{node_id}.values"))
+        scalar_ports[key] = f"{node_id}.result"
+
+    packed_fields: dict[str, str] = {}
+    if "divide" in goal_keys:
+        divide_spec = spec_by_key.get("divide")
+        if divide_spec is None or len(numeric_keys) != 1:
+            return None
+        nodes.append(GraphNode(id="divide", op="skill.invoke", config={"skill_id": divide_spec.skill_id}))
+        edges.append(GraphEdge(from_=scalar_ports[numeric_keys[0]], to="divide.a"))
+        edges.append(GraphEdge(from_="input.divisor", to="divide.b"))
+        inputs.append(IOField(name="divisor", type="string"))
+        packed_fields["result"] = "divide.result"
+    else:
+        label_map = {"median": "median", "max": "maximum", "min": "minimum"}
+        for key in numeric_keys:
+            packed_fields[label_map[key]] = scalar_ports[key]
+
+    nodes.append(GraphNode(id="pack", op="json.pack"))
+    for field_name, source in packed_fields.items():
+        edges.append(GraphEdge(from_=source, to=f"pack.{field_name}"))
+
+    nodes.append(GraphNode(id="pretty", op="skill.invoke", config={"skill_id": "json.pretty_print.v1"}))
+    edges.append(GraphEdge(from_="pack.raw_json", to="pretty.raw_json"))
+
+    outputs = [IOField(name="formatted", type="string")]
+    graph_outputs = {"formatted": "pretty.formatted"}
+
+    if "contains" in goal_keys:
+        contains_spec = spec_by_key.get("contains")
+        if contains_spec is None:
+            return None
+        nodes.append(GraphNode(id="contains", op="skill.invoke", config={"skill_id": contains_spec.skill_id}))
+        edges.append(GraphEdge(from_="pretty.formatted", to="contains.text"))
+        edges.append(GraphEdge(from_="input.substring", to="contains.substring"))
+        inputs.append(IOField(name="substring", type="string"))
+        outputs.append(IOField(name="result", type="string"))
+        graph_outputs["result"] = "contains.result"
+
+    return GlueGraph(
+        goal=goal,
+        inputs=inputs,
+        outputs=outputs,
+        effects=["pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=nodes,
+            edges=edges,
+            outputs=graph_outputs,
+        ),
+    )
+
+
 def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
     """Build a bounded branch fallback for sentiment-conditioned prefix formatting."""
     from graphsmith.models.common import IOField
@@ -791,7 +913,7 @@ def run_closed_loop(
         result.success = True
         return result
 
-    if existing_grounding_failure:
+    if existing_grounding_failure and not _goal_supports_structured_numeric_fallback(goal):
         existing_fallback = _build_existing_skill_fallback_plan(goal, registry)
         if existing_fallback is not None:
             result.replan_status = "success"
@@ -818,6 +940,44 @@ def run_closed_loop(
             result.stopped_reason = "loop_fallback_succeeded"
             result.success = True
             return result
+
+    if _goal_supports_structured_numeric_fallback(goal):
+        goal_keys = [key for key in match_template_keys(goal) if key in {"median", "max", "min", "divide", "contains"}]
+        generated_specs = [_spec_from_template(key, goal) for key in goal_keys]
+        registered_specs: list[SkillSpec] = []
+        try:
+            gen_dir = Path(output_dir) if output_dir else Path(tempfile.mkdtemp()) / "generated_skills"
+            gen_dir.mkdir(parents=True, exist_ok=True)
+            for spec in generated_specs:
+                if _find_registry_entry(registry, spec.skill_id) is not None:
+                    continue
+                skill_dir = generate_skill_files(spec, gen_dir)
+                val_result = validate_and_test(spec, skill_dir)
+                if not (
+                    val_result["validation"] == "PASS"
+                    and val_result["examples_passed"] == val_result["examples_total"]
+                ):
+                    break
+                register_generated_op(spec)
+                registered_specs.append(spec)
+                registry.publish(str(skill_dir))
+            else:
+                fallback_graph = _build_structured_numeric_fallback_plan(goal, registry, generated_specs)
+                if fallback_graph is not None:
+                    result.generated_spec = generated_specs[0] if generated_specs else None
+                    result.replan_status = "success"
+                    result.replan_plan = fallback_graph
+                    block_reason = _semantic_fidelity_block_reason(goal)
+                    if block_reason:
+                        result.stopped_reason = block_reason
+                        result.success = False
+                        return result
+                    result.stopped_reason = "structured_numeric_fallback_succeeded"
+                    result.success = True
+                    return result
+        finally:
+            for spec in reversed(registered_specs):
+                unregister_generated_op(spec)
 
     if _goal_supports_two_generated_linear_fallback(goal):
         generated_specs = [

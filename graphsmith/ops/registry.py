@@ -8,7 +8,7 @@ from graphsmith.ops.array_ops import array_filter, array_map
 from graphsmith.ops.assertion import assert_check
 from graphsmith.ops.branch import branch_if
 from graphsmith.ops.fallback import fallback_try
-from graphsmith.ops.json_ops import json_parse
+from graphsmith.ops.json_ops import json_pack, json_parse
 from graphsmith.ops.llm import llm_extract, llm_generate
 from graphsmith.ops.llm_provider import LLMProvider, StubLLMProvider
 from graphsmith.ops.parallel_map import parallel_map
@@ -28,6 +28,7 @@ from graphsmith.ops.text_ops import (
 _PURE_OPS: dict[str, Any] = {
     "template.render": template_render,
     "json.parse": json_parse,
+    "json.pack": json_pack,
     "select.fields": select_fields,
     "assert.check": assert_check,
     "branch.if": branch_if,

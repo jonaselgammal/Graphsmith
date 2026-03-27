@@ -7,7 +7,7 @@ from graphsmith.exceptions import OpError
 from graphsmith.ops.assertion import assert_check
 from graphsmith.ops.branch import branch_if
 from graphsmith.ops.fallback import fallback_try
-from graphsmith.ops.json_ops import json_parse
+from graphsmith.ops.json_ops import json_pack, json_parse
 from graphsmith.ops.llm import llm_extract, llm_generate
 from graphsmith.ops.llm_provider import EchoLLMProvider
 from graphsmith.ops.select import select_fields
@@ -72,6 +72,20 @@ class TestJsonParse:
     def test_non_string(self) -> None:
         with pytest.raises(OpError, match="must be a string"):
             json_parse({}, {"text": 123})
+
+
+class TestJsonPack:
+    def test_packs_inputs_into_json_string(self) -> None:
+        result = json_pack({}, {"median": "2.5", "maximum": "4"})
+        assert result == {"raw_json": '{"median": "2.5", "maximum": "4"}'}
+
+    def test_packs_static_fields(self) -> None:
+        result = json_pack({"static_fields": {"kind": "summary"}}, {"median": "2"})
+        assert result == {"raw_json": '{"median": "2", "kind": "summary"}'}
+
+    def test_rejects_non_dict_static_fields(self) -> None:
+        with pytest.raises(OpError, match="static_fields must be a dict"):
+            json_pack({"static_fields": "bad"}, {"x": "1"})
 
 
 # ── select.fields ────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""json.parse op — parse a JSON string into a Python object."""
+"""JSON ops — parse and assemble JSON payloads."""
 from __future__ import annotations
 
 import json
@@ -26,3 +26,29 @@ def json_parse(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]
     except json.JSONDecodeError as exc:
         raise OpError(f"json.parse: invalid JSON — {exc}") from exc
     return {"parsed": parsed}
+
+
+def json_pack(config: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    """Pack arbitrary scalar inputs into a JSON object string.
+
+    Inputs:
+        Any input ports become fields in the packed object unless the value is None.
+
+    Config:
+        static_fields (dict, optional): Additional constant fields to merge in.
+
+    Returns:
+        {"raw_json": <JSON string>}
+    """
+    static_fields = config.get("static_fields", {})
+    if static_fields is None:
+        static_fields = {}
+    if not isinstance(static_fields, dict):
+        raise OpError("json.pack: config.static_fields must be a dict")
+
+    payload: dict[str, Any] = {}
+    for key, value in inputs.items():
+        if value is not None:
+            payload[key] = value
+    payload.update(static_fields)
+    return {"raw_json": json.dumps(payload)}
