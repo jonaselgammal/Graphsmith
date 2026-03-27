@@ -516,6 +516,313 @@ class TestRunGlueGraph:
         assert "runtime:format_output: regenerated branch region from runtime trace" in exec_result.repairs
         assert provider.calls == 1
 
+    def test_runtime_repairs_nested_multi_region_test_skill(self, tmp_path: Path) -> None:
+        project = Path.cwd() / f".tmp_nested_multi_region_project_{tmp_path.name}"
+        project.mkdir(exist_ok=True)
+        input_file = project / "input.txt"
+        output_file = project / "output.txt"
+        input_file.write_text("hello\nworld\n", encoding="utf-8")
+        (project / "test_ok.py").write_text(
+            "def test_ok():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+        reg = LocalRegistry(root=tmp_path / "reg")
+        read_skill_dir = write_package(
+            tmp_path / "fs_read_pkg",
+            skill={
+                "id": "fs.read_text.v1",
+                "name": "Read Text File",
+                "version": "1.0.0",
+                "description": "Read a text file from disk.",
+                "inputs": [{"name": "path", "type": "string", "required": True}],
+                "outputs": [{"name": "text", "type": "string"}],
+                "effects": ["filesystem_read"],
+                "tags": ["filesystem", "io"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{
+                    "id": "read",
+                    "op": "fs.read_text",
+                    "config": {"allow_roots": [str(project)]},
+                }],
+                "edges": [{"from": "input.path", "to": "read.path"}],
+                "outputs": {"text": "read.text"},
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(read_skill_dir)
+        write_skill_dir = write_package(
+            tmp_path / "fs_write_pkg",
+            skill={
+                "id": "fs.write_text.v1",
+                "name": "Write Text File",
+                "version": "1.0.0",
+                "description": "Write a text file to disk.",
+                "inputs": [
+                    {"name": "path", "type": "string", "required": True},
+                    {"name": "text", "type": "string", "required": True},
+                ],
+                "outputs": [
+                    {"name": "path", "type": "string"},
+                    {"name": "written", "type": "boolean"},
+                ],
+                "effects": ["filesystem_write"],
+                "tags": ["filesystem", "io"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{
+                    "id": "write",
+                    "op": "fs.write_text",
+                    "config": {"allow_roots": [str(project)]},
+                }],
+                "edges": [
+                    {"from": "input.path", "to": "write.path"},
+                    {"from": "input.text", "to": "write.text"},
+                ],
+                "outputs": {"path": "write.path", "written": "write.written"},
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(write_skill_dir)
+        pytest_skill_dir = write_package(
+            tmp_path / "run_pytest_pkg",
+            skill={
+                "id": "dev.run_pytest.v1",
+                "name": "Run Pytest",
+                "version": "1.0.0",
+                "description": "Run pytest in a project directory.",
+                "inputs": [{"name": "cwd", "type": "string", "required": True}],
+                "outputs": [
+                    {"name": "stdout", "type": "string"},
+                    {"name": "stderr", "type": "string"},
+                    {"name": "exit_code", "type": "string"},
+                ],
+                "effects": ["shell_exec"],
+                "tags": ["dev", "testing"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{
+                    "id": "run",
+                    "op": "shell.exec",
+                    "config": {
+                        "argv": ["pytest", "-q"],
+                        "allow_roots": [str(project)],
+                        "timeout_ms": 20000,
+                    },
+                }],
+                "edges": [{"from": "input.cwd", "to": "run.cwd"}],
+                "outputs": {
+                    "stdout": "run.stdout",
+                    "stderr": "run.stderr",
+                    "exit_code": "run.exit_code",
+                },
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(pytest_skill_dir)
+        reg.publish(EXAMPLE_DIR / "text.title_case.v1")
+        reg.publish(EXAMPLE_DIR / "text.prefix_lines.v1")
+
+        edit_skill_dir = write_package(
+            tmp_path / "edit_region_pkg",
+            skill={
+                "id": "synth.file_region.v1",
+                "name": "Synth File Region",
+                "version": "1.0.0",
+                "description": "read transform write region",
+                "inputs": [
+                    {"name": "input_path", "type": "string", "required": True},
+                    {"name": "output_path", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "path", "type": "string"}],
+                "effects": ["filesystem_read", "filesystem_write", "pure"],
+                "tags": ["synthesized", "subgraph"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [
+                    {"id": "read", "op": "skill.invoke", "config": {"skill_id": "fs.read_text.v1", "version": "1.0.0"}},
+                    {"id": "transform", "op": "skill.invoke", "config": {"skill_id": "text.title_case.v1", "version": "1.0.0"}},
+                    {"id": "write", "op": "skill.invoke", "config": {"skill_id": "fs.write_text.v1", "version": "1.0.0"}},
+                ],
+                "edges": [
+                    {"from": "input.input_path", "to": "read.path"},
+                    {"from": "read.text", "to": "transform.text"},
+                    {"from": "input.output_path", "to": "write.path"},
+                    {"from": "transform.titled", "to": "write.text"},
+                ],
+                "outputs": {"path": "write.path"},
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(edit_skill_dir)
+
+        branch_ir = PlanningIR(
+            goal="run pytest and prefix output by status",
+            inputs=[
+                IRInput(name="cwd", type="string"),
+                IRInput(name="after_path", type="string"),
+            ],
+            steps=[
+                IRStep(
+                    name="pytest",
+                    skill_id="dev.run_pytest.v1",
+                    sources={"cwd": IRSource(step="input", port="cwd")},
+                ),
+                IRStep(name="zero", skill_id="template.render", config={"template": "0"}),
+                IRStep(
+                    name="is_success",
+                    skill_id="text.equals",
+                    sources={
+                        "text": IRSource(step="pytest", port="exit_code"),
+                        "other": IRSource(step="zero", port="rendered"),
+                    },
+                ),
+            ],
+            blocks=[
+                IRBlock(
+                    name="format_output",
+                    kind="branch",
+                    condition=IRSource(step="is_success", port="result"),
+                    inputs={"stdout": IRSource(step="pytest", port="stdout")},
+                    then_steps=[
+                        IRStep(name="pass_label", skill_id="template.render", config={"template": "PASS"}),
+                        IRStep(
+                            name="prefix_pass",
+                            skill_id="text.prefix_lines.v1",
+                            sources={
+                                "text": IRSource(step="input", port="stdout"),
+                                "prefix": IRSource(step="pass_label", port="rendered"),
+                            },
+                        ),
+                    ],
+                    else_steps=[
+                        IRStep(name="fail_label", skill_id="template.render", config={"template": "FAIL"}),
+                        IRStep(
+                            name="prefix_fail",
+                            skill_id="text.prefix_lines.v1",
+                            sources={
+                                "text": IRSource(step="input", port="stdout"),
+                                "prefix": IRSource(step="fail_label", port="rendered"),
+                            },
+                        ),
+                    ],
+                    then_outputs={"prefixed": IROutputRef(step="prefix_pass", port="prefixed")},
+                    else_outputs={"prefixed": IROutputRef(step="prefix_fail", port="prefixed")},
+                )
+            ],
+            final_outputs={"stdout": IROutputRef(step="format_output", port="prefixed")},
+            effects=["shell_exec", "pure"],
+        )
+        test_glue = compile_ir(branch_ir)
+        broken_edges = []
+        for edge in test_glue.graph.edges:
+            if edge.to == "format_output_then_prefix_pass.prefix":
+                broken_edges.append(edge.model_copy(update={"from_": "zero.missing"}))
+            else:
+                broken_edges.append(edge)
+        test_skill_dir = write_package(
+            tmp_path / "test_region_pkg",
+            skill={
+                "id": "synth.test_region.v1",
+                "name": "Synth Test Region",
+                "version": "1.0.0",
+                "description": "test region",
+                "inputs": [
+                    {"name": "cwd", "type": "string", "required": True},
+                    {"name": "after_path", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "stdout", "type": "string"}],
+                "effects": ["shell_exec", "pure"],
+                "tags": ["synthesized", "subgraph"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [
+                    {"id": "after_path_token", "op": "template.render", "config": {"template": "{{after_path}}"}},
+                    *[node.model_dump(mode="json", by_alias=True) for node in test_glue.graph.nodes],
+                ],
+                "edges": [
+                    {"from": "input.after_path", "to": "after_path_token.after_path"},
+                    *[edge.model_dump(mode="json", by_alias=True) for edge in broken_edges],
+                ],
+                "outputs": dict(test_glue.graph.outputs),
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(test_skill_dir)
+
+        outer_glue = GlueGraph(
+            goal="edit file then run tests",
+            inputs=[
+                IOField(name="input_path", type="string"),
+                IOField(name="output_path", type="string"),
+                IOField(name="cwd", type="string"),
+            ],
+            outputs=[IOField(name="stdout", type="string")],
+            effects=["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+            graph=GraphBody(
+                version=1,
+                nodes=[
+                    GraphNode(
+                        id="edit_region",
+                        op="skill.invoke",
+                        config={"skill_id": "synth.file_region.v1", "version": "1.0.0"},
+                    ),
+                    GraphNode(
+                        id="test_region",
+                        op="skill.invoke",
+                        config={"skill_id": "synth.test_region.v1", "version": "1.0.0"},
+                    ),
+                ],
+                edges=[
+                    {"from": "input.input_path", "to": "edit_region.input_path"},
+                    {"from": "input.output_path", "to": "edit_region.output_path"},
+                    {"from": "input.cwd", "to": "test_region.cwd"},
+                    {"from": "edit_region.path", "to": "test_region.after_path"},
+                ],
+                outputs={"stdout": "test_region.stdout"},
+            ),
+        )
+
+        repaired_block = json.dumps({"block": branch_ir.blocks[0].model_dump(mode="json")})
+
+        class RepairProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def generate(self, prompt: str, **kwargs: Any) -> str:
+                self.calls += 1
+                return repaired_block
+
+        provider = RepairProvider()
+        exec_result = run_glue_graph(
+            outer_glue,
+            {
+                "input_path": str(input_file),
+                "output_path": str(output_file),
+                "cwd": str(project),
+            },
+            llm_provider=provider,  # type: ignore[arg-type]
+            registry=reg,
+        )
+
+        assert "PASS" in exec_result.outputs["stdout"]
+        assert output_file.read_text(encoding="utf-8").startswith("Hello")
+        assert "runtime:format_output: regenerated branch region from runtime trace" in exec_result.repairs
+        swap_actions = [
+            action for action in exec_result.repairs
+            if action.startswith("runtime:test_region: swapped repaired nested skill ")
+        ]
+        assert len(swap_actions) == 1
+        repaired_entries = [entry for entry in reg.list_all() if entry.id.startswith("repair.synth_test_region_v1_")]
+        assert len(repaired_entries) == 1
+        assert provider.calls == 1
+
     def test_normalizes_nested_parallel_map_skill_target(self, tmp_path: Path) -> None:
         reg = LocalRegistry(root=tmp_path / "reg")
         reg.publish(EXAMPLE_DIR / "text.normalize.v1")

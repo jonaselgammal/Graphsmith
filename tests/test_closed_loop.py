@@ -263,6 +263,56 @@ class TestClosedLoopOrchestration:
         assert not result.success
         assert result.stopped_reason == "semantic_fidelity_blocked"
 
+    def test_multi_region_environment_fallback_succeeds(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Read a file, title case it, write it to a new file, and then run pytest in the project",
+                FailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "multi_region_environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.inputs} == {"input_path", "output_path", "cwd"}
+        assert {field.name for field in result.replan_plan.outputs} == {"stdout"}
+        assert len(result.replan_plan.graph.nodes) == 2
+        assert all(node.op == "skill.invoke" for node in result.replan_plan.graph.nodes)
+        skill_ids = [
+            node.config["skill_id"]
+            for node in result.replan_plan.graph.nodes
+            if isinstance(node.config, dict)
+        ]
+        assert len(skill_ids) == 2
+        assert all(skill_id.startswith("synth.") for skill_id in skill_ids)
+        assert result.synthesized_skill_id
+        synthesized_ids = set(result.synthesized_skill_id.split(","))
+        assert synthesized_ids == set(skill_ids)
+        for skill_id in skill_ids:
+            pkg = reg.fetch(skill_id, "1.0.0")
+            assert pkg.skill.id == skill_id
+            assert pkg.graph.nodes
+
     def test_environment_fallback_read_normalize_succeeds(self) -> None:
         class FailBackend:
             _candidate_count = 1

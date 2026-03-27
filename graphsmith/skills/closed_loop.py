@@ -55,6 +55,20 @@ _TRANSFORM_SKILL_IDS: dict[str, str] = {
     "extract_field": "json.extract_field.v1",
     "pretty_print": "json.pretty_print.v1",
 }
+_SKILL_OUTPUT_PORTS: dict[str, str] = {
+    "text.normalize.v1": "normalized",
+    "text.summarize.v1": "summary",
+    "text.extract_keywords.v1": "keywords",
+    "text.title_case.v1": "titled",
+    "text.classify_sentiment.v1": "sentiment",
+    "text.word_count.v1": "count",
+    "text.sort_lines.v1": "sorted",
+    "text.remove_duplicates.v1": "deduplicated",
+    "text.join_lines.v1": "joined",
+    "json.reshape.v1": "reshaped",
+    "json.extract_field.v1": "value",
+    "json.pretty_print.v1": "formatted",
+}
 
 
 # ── Missing-skill detection ──────────────────────────────────────
@@ -334,6 +348,22 @@ def _goal_matches_loop_read_contains(goal: str) -> bool:
     )
 
 
+def _goal_matches_file_transform_write_then_pytest(goal: str) -> bool:
+    goal_lower = goal.lower()
+    if not (
+        "read" in goal_lower
+        and "file" in goal_lower
+        and "write" in goal_lower
+        and "pytest" in goal_lower
+    ):
+        return False
+    decomp = decompose_deterministic(goal)
+    return (
+        len(decomp.content_transforms) == 1
+        and _TRANSFORM_SKILL_IDS.get(decomp.content_transforms[0]) is not None
+    )
+
+
 def _goal_supports_environment_fallback(goal: str) -> bool:
     return any((
         _goal_matches_read_normalize(goal),
@@ -343,6 +373,7 @@ def _goal_supports_environment_fallback(goal: str) -> bool:
         _goal_matches_read_replace_write(goal),
         _goal_matches_pytest_prefix_branch(goal),
         _goal_matches_loop_read_contains(goal),
+        _goal_matches_file_transform_write_then_pytest(goal),
     ))
 
 
@@ -1122,6 +1153,129 @@ def _build_loop_read_contains_plan(
     return compile_ir(ir)
 
 
+def _build_file_transform_write_then_pytest_plan(
+    goal: str,
+    registry: RegistryBackend,
+    *,
+    output_dir: str | Path | None = None,
+) -> tuple[GlueGraph | None, list[tuple[str, str, str]]]:
+    from graphsmith.models.common import IOField
+    from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+    if not _goal_matches_file_transform_write_then_pytest(goal):
+        return None, []
+
+    decomp = decompose_deterministic(goal)
+    transform = decomp.content_transforms[0]
+    transform_skill_id = _TRANSFORM_SKILL_IDS.get(transform)
+    if transform_skill_id is None:
+        return None, []
+
+    available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
+    required = {"fs.read_text.v1", "fs.write_text.v1", "dev.run_pytest.v1", transform_skill_id}
+    if not required.issubset(available):
+        return None, []
+
+    file_region = GlueGraph(
+        goal=f"{goal} :: file region",
+        inputs=[
+            IOField(name="input_path", type="string"),
+            IOField(name="output_path", type="string"),
+        ],
+        outputs=[IOField(name="path", type="string")],
+        effects=["filesystem_read", "filesystem_write", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="read", op="skill.invoke", config={"skill_id": "fs.read_text.v1", "version": "1.0.0"}),
+                GraphNode(id="transform", op="skill.invoke", config={"skill_id": transform_skill_id, "version": "1.0.0"}),
+                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.input_path", to="read.path"),
+                GraphEdge(from_="read.text", to="transform.text"),
+                GraphEdge(from_="input.output_path", to="write.path"),
+                GraphEdge(
+                    from_=f"transform.{_SKILL_OUTPUT_PORTS[transform_skill_id]}",
+                    to="write.text",
+                ),
+            ],
+            outputs={"path": "write.path"},
+        ),
+    )
+    file_plan, file_skill_id, file_dir = _materialize_subgraph_skill(
+        goal,
+        file_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="file_region",
+    )
+    if file_plan is None:
+        return None, []
+
+    test_region = GlueGraph(
+        goal=f"{goal} :: test region",
+        inputs=[
+            IOField(name="cwd", type="string"),
+            IOField(name="after_path", type="string"),
+        ],
+        outputs=[IOField(name="stdout", type="string")],
+        effects=["shell_exec"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="after_path_token", op="template.render", config={"template": "{{after_path}}"}),
+                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.cwd", to="pytest.cwd"),
+                GraphEdge(from_="input.after_path", to="after_path_token.after_path"),
+            ],
+            outputs={"stdout": "pytest.stdout"},
+        ),
+    )
+    test_plan, test_skill_id, test_dir = _materialize_subgraph_skill(
+        goal,
+        test_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="test_region",
+    )
+    if test_plan is None:
+        return None, []
+
+    outer = GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="input_path", type="string"),
+            IOField(name="output_path", type="string"),
+            IOField(name="cwd", type="string"),
+        ],
+        outputs=[IOField(name="stdout", type="string")],
+        effects=["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="edit_region", op="skill.invoke", config={"skill_id": file_skill_id, "version": "1.0.0"}),
+                GraphNode(id="test_region", op="skill.invoke", config={"skill_id": test_skill_id, "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.input_path", to="edit_region.input_path"),
+                GraphEdge(from_="input.output_path", to="edit_region.output_path"),
+                GraphEdge(from_="input.cwd", to="test_region.cwd"),
+                GraphEdge(from_="edit_region.path", to="test_region.after_path"),
+            ],
+            outputs={"stdout": "test_region.stdout"},
+        ),
+    )
+    return outer, [
+        (file_skill_id, "1.0.0", file_dir),
+        (test_skill_id, "1.0.0", test_dir),
+    ]
+
+
 def _build_environment_fallback_plan(
     goal: str,
     registry: RegistryBackend,
@@ -1354,14 +1508,16 @@ def _build_single_skill_invoke_plan(
     )
 
 
-def _synthesize_subgraph_skill(
+def _materialize_subgraph_skill(
     goal: str,
     graph: GlueGraph,
     registry: RegistryBackend,
     *,
     output_dir: str | Path | None = None,
+    smoke_test: bool = True,
+    slug_hint: str | None = None,
 ) -> tuple[GlueGraph | None, str, str]:
-    """Materialize a composed graph as a reusable skill package and invoke plan."""
+    """Materialize a composed graph as a reusable local skill package."""
     from graphsmith.models.common import ExampleCase
     from graphsmith.models.package import ExamplesFile, SkillPackage
     from graphsmith.models.skill import SkillMetadata
@@ -1371,7 +1527,8 @@ def _synthesize_subgraph_skill(
 
     graph_dump = json.dumps(graph.model_dump(mode="json"), sort_keys=True)
     digest = hashlib.sha1(graph_dump.encode("utf-8")).hexdigest()[:8]
-    slug = "".join(c if c.isalnum() else "_" for c in goal.lower()).strip("_")[:24] or "workflow"
+    slug_base = slug_hint or goal
+    slug = "".join(c if c.isalnum() else "_" for c in slug_base.lower()).strip("_")[:24] or "workflow"
     skill_id = f"synth.{slug}_{digest}.v1"
 
     existing = _find_registry_entry(registry, skill_id)
@@ -1401,29 +1558,30 @@ def _synthesize_subgraph_skill(
     )
     validate_skill_package(pkg)
 
-    sample_inputs = {
-        field.name: _sample_input_value(field.name, field.type)
-        for field in pkg.skill.inputs
-    }
-    smoke = run_skill_package(
-        pkg,
-        sample_inputs,
-        registry=registry,
-        llm_provider=EchoLLMProvider(prefix=""),
-    )
-    pkg = pkg.model_copy(
-        update={
-            "examples": ExamplesFile(
-                examples=[
-                    ExampleCase(
-                        name="smoke",
-                        input=sample_inputs,
-                        expected_output=smoke.outputs,
-                    )
-                ]
-            )
+    if smoke_test:
+        sample_inputs = {
+            field.name: _sample_input_value(field.name, field.type)
+            for field in pkg.skill.inputs
         }
-    )
+        smoke = run_skill_package(
+            pkg,
+            sample_inputs,
+            registry=registry,
+            llm_provider=EchoLLMProvider(prefix=""),
+        )
+        pkg = pkg.model_copy(
+            update={
+                "examples": ExamplesFile(
+                    examples=[
+                        ExampleCase(
+                            name="smoke",
+                            input=sample_inputs,
+                            expected_output=smoke.outputs,
+                        )
+                    ]
+                )
+            }
+        )
 
     synth_root = Path(output_dir) if output_dir else Path(tempfile.mkdtemp()) / "synthesized_skills"
     synth_root.mkdir(parents=True, exist_ok=True)
@@ -1447,6 +1605,23 @@ def _synthesize_subgraph_skill(
         _build_single_skill_invoke_plan(goal, skill_id, graph.inputs, graph.outputs, graph.effects),
         skill_id,
         str(skill_dir),
+    )
+
+
+def _synthesize_subgraph_skill(
+    goal: str,
+    graph: GlueGraph,
+    registry: RegistryBackend,
+    *,
+    output_dir: str | Path | None = None,
+) -> tuple[GlueGraph | None, str, str]:
+    """Materialize a composed graph as a reusable skill package and invoke plan."""
+    return _materialize_subgraph_skill(
+        goal,
+        graph,
+        registry,
+        output_dir=output_dir,
+        smoke_test=True,
     )
 
 
@@ -1604,6 +1779,9 @@ def _environment_workflow_grounding_failure(
         required_skill_ids = {"parallel.map"}
         required_inputs = {"paths", "substring"}
         required_outputs = {"result"}
+    elif _goal_matches_file_transform_write_then_pytest(goal):
+        required_inputs = {"input_path", "output_path", "cwd"}
+        required_outputs = {"stdout"}
     else:
         return ""
 
@@ -1618,9 +1796,14 @@ def _environment_workflow_grounding_failure(
         return "missing_environment_outputs:" + ",".join(missing_outputs)
 
     skill_ids = set(_graph_skill_ids(graph))
-    missing_skills = sorted(required_skill_ids - skill_ids)
-    if missing_skills:
-        return "missing_environment_skills:" + ",".join(missing_skills)
+    if required_skill_ids:
+        missing_skills = sorted(required_skill_ids - skill_ids)
+        if missing_skills:
+            return "missing_environment_skills:" + ",".join(missing_skills)
+    elif _goal_matches_file_transform_write_then_pytest(goal):
+        invoke_count = sum(1 for node in graph.graph.nodes if node.op == "skill.invoke")
+        if invoke_count < 2:
+            return "missing_environment_regions:file_and_test"
 
     return ""
 
@@ -1701,6 +1884,26 @@ def run_closed_loop(
         and not environment_grounding_failure
     ):
         result.stopped_reason = "initial_plan_succeeded"
+        result.success = True
+        return result
+
+    multi_region_environment_fallback, region_refs = _build_file_transform_write_then_pytest_plan(
+        goal,
+        registry,
+        output_dir=output_dir,
+    )
+    if multi_region_environment_fallback is not None:
+        result.replan_status = "success"
+        result.replan_plan = multi_region_environment_fallback
+        if region_refs:
+            result.synthesized_skill_id = ",".join(skill_id for skill_id, _, _ in region_refs)
+            result.synthesis_dir = ",".join(path for _, _, path in region_refs if path)
+        block_reason = _semantic_fidelity_block_reason(goal)
+        if block_reason:
+            result.stopped_reason = block_reason
+            result.success = False
+            return result
+        result.stopped_reason = "multi_region_environment_fallback_succeeded"
         result.success = True
         return result
 
