@@ -1,9 +1,0 @@
-{
-  "id": "f12",
-  "goal": "Normalize this text, replace one substring with another, and check whether it contains a phrase",
-  "tier": 3,
-  "tags": ["text", "multi_generated", "boundary"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed", "semantic_fidelity_blocked"],
-  "notes": "Two generated text capabilities in one linear chain."
-}

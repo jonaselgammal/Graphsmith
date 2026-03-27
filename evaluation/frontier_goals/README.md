@@ -3,9 +3,9 @@
 This suite is meant to probe where Graphsmith currently stops generalizing.
 
 It mixes:
-- tier 1: near-frontier linear chains that still ought to work
+- tier 1: near-frontier linear chains that still might work
 - tier 2: looped or multi-generated chains that should currently fail cleanly
-- tier 3: broader boundary probes around conjunctions, multiple generated skills, and external effects
+- tier 3: remote/published-only/trust-shaped probes plus external-effect boundaries
 
 Use:
 
@@ -26,3 +26,9 @@ Optional semantic expectation fields per goal:
 
 These let the frontier suite check semantic structure, not just whether the
 closed-loop path stopped in `success`.
+
+The current refresh is intentionally harder than the previous suite. It adds:
+
+- tougher success cases with existing-skill plus generated formatting/predicate composition
+- more loop-plus-generated boundary cases
+- published-only / trust-shaped prompts that the current planner does not yet model explicitly

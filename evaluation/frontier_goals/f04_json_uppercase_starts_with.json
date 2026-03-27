@@ -1,9 +1,0 @@
-{
-  "id": "f04",
-  "goal": "Parse this JSON, extract the value field, convert it to uppercase, and check whether it starts with a prefix",
-  "tier": 2,
-  "tags": ["json", "text", "multi_generated", "boundary"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed", "semantic_fidelity_blocked"],
-  "notes": "Two generated text capabilities after JSON extraction."
-}

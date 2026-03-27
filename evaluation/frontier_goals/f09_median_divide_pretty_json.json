@@ -1,5 +1,5 @@
 {
-  "id": "f08",
+  "id": "f09",
   "goal": "Compute the median, divide it by another number, and pretty print it as JSON",
   "tier": 2,
   "tags": ["math", "json", "generated", "multi_missing"],

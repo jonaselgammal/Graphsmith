@@ -1,0 +1,11 @@
+{
+  "id": "f01",
+  "goal": "Parse this JSON, extract the value field, pretty print it as JSON, and check whether the formatted result contains a phrase",
+  "tier": 1,
+  "tags": ["json", "text", "generated", "composition"],
+  "expected_success": true,
+  "required_skill_ids": ["json.extract_field.v1", "json.pretty_print.v1", "text.contains.v1"],
+  "required_graph_inputs": ["substring"],
+  "min_node_count": 3,
+  "notes": "Existing JSON extraction and formatting composed with a generated contains predicate."
+}

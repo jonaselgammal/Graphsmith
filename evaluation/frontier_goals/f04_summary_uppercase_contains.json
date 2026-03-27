@@ -1,5 +1,5 @@
 {
-  "id": "f03",
+  "id": "f04",
   "goal": "Summarize this text, convert the summary to uppercase, and check whether it contains a phrase",
   "tier": 2,
   "tags": ["text", "llm", "multi_generated", "boundary"],

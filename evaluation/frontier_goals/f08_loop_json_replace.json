@@ -1,5 +1,5 @@
 {
-  "id": "f07",
+  "id": "f08",
   "goal": "For each JSON object, extract the value field and replace one substring with another",
   "tier": 2,
   "tags": ["loop", "json", "text", "generated"],

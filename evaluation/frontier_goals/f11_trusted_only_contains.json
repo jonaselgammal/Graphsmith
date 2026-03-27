@@ -1,0 +1,9 @@
+{
+  "id": "f11",
+  "goal": "Using only trusted published skills, parse this JSON, extract the value field, and check whether it contains a phrase",
+  "tier": 3,
+  "tags": ["published_only", "trust", "json", "text", "boundary"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed", "semantic_fidelity_blocked"],
+  "notes": "Probes trust/provenance-aware retrieval and should fail cleanly until planner-visible trust gates exist."
+}
