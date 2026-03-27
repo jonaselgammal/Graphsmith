@@ -1,9 +1,0 @@
-{
-  "id": "f10",
-  "goal": "Using only already published skills, normalize this text and check whether it starts with a prefix",
-  "tier": 3,
-  "tags": ["published_only", "text", "remote", "trust", "boundary"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["missing_skill_not_detected", "replan_failed", "semantic_fidelity_blocked"],
-  "notes": "Probes whether closed-loop incorrectly claims success by generating a skill despite a published-only constraint."
-}

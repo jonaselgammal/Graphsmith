@@ -1,9 +1,0 @@
-{
-  "id": "f08",
-  "goal": "For each JSON object, extract the value field and replace one substring with another",
-  "tier": 2,
-  "tags": ["loop", "json", "text", "generated"],
-  "expected_success": false,
-  "accepted_stop_reasons": ["replan_failed", "missing_skill_not_detected", "existing_skill_replan_failed", "semantic_fidelity_blocked"],
-  "notes": "Loop plus JSON extraction plus generated replace."
-}
