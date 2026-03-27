@@ -101,7 +101,27 @@ python scripts/collect_candidate_data.py --runs 1 \
   --provider anthropic --model claude-haiku-4-5-20251001 --delay 2
 ```
 
-## 7. Compare planners (direct vs IR)
+## 7. Run the stress frontier suite
+
+This is the heavier boundary-mapping harness. It reports pass rate, generated
+skills, registry growth, stop-reason histograms, and promotion candidates.
+
+```bash
+graphsmith eval-stress-frontier --goals evaluation/stress_frontier_goals --registry "$REG" \
+  --backend ir --mode isolated --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1 --output-format json
+
+graphsmith eval-stress-frontier --goals evaluation/stress_frontier_goals --registry "$REG" \
+  --backend ir --mode cumulative --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1 --output-format json
+```
+
+Interpretation:
+- `isolated` shows whether each case can stand on its own
+- `cumulative` shows whether the registry gets better as generated skills accumulate
+- promotion candidates point to repeated multi-step fragments that may now be worth promoting
+
+## 8. Compare planners (direct vs IR)
 
 ```bash
 GS_EVAL_DELAY=3 scripts/eval_compare_planners.sh \

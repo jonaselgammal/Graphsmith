@@ -1,0 +1,10 @@
+{
+  "id": "s02",
+  "goal": "For each text, normalize it, extract keywords, replace commas with newlines, and return the formatted keywords",
+  "tier": 1,
+  "tags": ["loop", "text", "generated"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "semantic_fidelity_blocked", "missing_skill_not_detected"],
+  "notes": "Loop plus generated formatting transform."
+}
+

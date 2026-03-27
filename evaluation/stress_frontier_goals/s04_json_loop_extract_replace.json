@@ -1,0 +1,10 @@
+{
+  "id": "s04",
+  "goal": "For each JSON object, extract the value field and replace one substring with another",
+  "tier": 2,
+  "tags": ["loop", "json", "generated"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "semantic_fidelity_blocked", "missing_skill_not_detected"],
+  "notes": "Loop over structured data with a generated string transform."
+}
+

@@ -1,0 +1,10 @@
+{
+  "id": "s09",
+  "goal": "For each text, summarize it and check whether the summary starts with a prefix",
+  "tier": 3,
+  "tags": ["loop", "llm", "generated"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "semantic_fidelity_blocked", "missing_skill_not_detected"],
+  "notes": "Looped LLM step plus generated predicate."
+}
+

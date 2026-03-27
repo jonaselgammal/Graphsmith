@@ -1,0 +1,12 @@
+{
+  "id": "s03",
+  "goal": "Classify the sentiment of this text and, if it is positive, prefix each line with a plus sign, otherwise prefix each line with a minus sign",
+  "tier": 2,
+  "tags": ["branch", "text", "llm"],
+  "expected_success": true,
+  "required_skill_ids": ["text.classify_sentiment.v1", "text.prefix_lines.v1"],
+  "required_graph_inputs": ["positive_prefix", "negative_prefix"],
+  "min_node_count": 3,
+  "notes": "Branch-style decomposition with reusable line-formatting skill."
+}
+

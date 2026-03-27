@@ -1,0 +1,10 @@
+{
+  "id": "s05",
+  "goal": "Compute the median of these numbers, divide it by another number, and pretty print the result as JSON",
+  "tier": 2,
+  "tags": ["math", "json", "generated"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["replan_failed", "semantic_fidelity_blocked", "missing_skill_not_detected"],
+  "notes": "Multiple generated math capabilities plus formatting."
+}
+

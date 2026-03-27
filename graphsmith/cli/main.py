@@ -1203,6 +1203,84 @@ def eval_frontier(
         )
 
 
+@app.command("eval-stress-frontier")
+def eval_stress_frontier(
+    goals_dir: str = typer.Option(
+        "evaluation/stress_frontier_goals", "--goals",
+        help="Directory containing stress frontier goal JSON files.",
+    ),
+    registry_root: Optional[str] = typer.Option(
+        None, "--registry", help="Registry root with published skills.",
+    ),
+    remote_registry_root: Optional[str] = typer.Option(
+        None, "--remote-registry",
+        help="Optional remote registry root or URL to merge with the local registry.",
+    ),
+    backend: str = typer.Option("ir", "--backend", help="Planner backend: auto, mock, llm, or ir."),
+    mock_llm: bool = typer.Option(False, "--mock-llm", help="Use echo mock for LLM."),
+    provider: str = typer.Option("echo", "--provider", help="LLM provider: echo, anthropic, or openai."),
+    model: Optional[str] = typer.Option(None, "--model", help="Model name."),
+    base_url: Optional[str] = typer.Option(None, "--base-url", help="Base URL for OpenAI-compatible providers."),
+    output_format: str = typer.Option("text", "--output-format", help="text or json."),
+    mode: str = typer.Option("isolated", "--mode", help="isolated or cumulative registry mode."),
+    ir_candidates: int = typer.Option(1, "--ir-candidates", help="Number of IR candidates to generate and rerank."),
+    use_decomposition: bool = typer.Option(False, "--decompose", help="Add semantic decomposition stage before IR generation."),
+) -> None:
+    """Run the harder stress-frontier suite with isolated or cumulative registry growth."""
+    from graphsmith.evaluation.stress_eval import load_stress_cases, run_stress_suite
+
+    reg = _make_registry_backend(registry_root, remote_registry_root)
+    planner_backend = _make_planner_backend(
+        backend, mock_llm, provider=provider, model=model, base_url=base_url,
+        ir_candidates=ir_candidates, use_decomposition=use_decomposition,
+    )
+    cases = load_stress_cases(goals_dir)
+    report = run_stress_suite(
+        cases,
+        reg,
+        planner_backend,
+        provider_name=provider,
+        model_name=model or "",
+        mode=mode,
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report.model_dump(), indent=2))
+        return
+
+    typer.echo(f"Stress Frontier Evaluation ({report.provider} {report.model})")
+    typer.echo(
+        f"Mode: {report.mode}  Passed: {report.passed}/{report.total} "
+        f"({report.pass_rate * 100:.1f}%)  Generated cases: {report.generated_cases}  "
+        f"Unique generated skills: {report.unique_generated_skill_count}"
+    )
+    typer.echo(
+        f"Registry size: {report.start_registry_size} -> {report.final_registry_size} "
+        f"(growth: {report.registry_growth})"
+    )
+    if report.stop_reason_counts:
+        typer.echo(f"Stop reasons: {json.dumps(report.stop_reason_counts, sort_keys=True)}")
+    if report.promotion_candidates:
+        typer.echo("Promotion candidates:")
+        for candidate in report.promotion_candidates[:5]:
+            typer.echo(
+                f"  - {candidate.suggested_skill_id}  freq={candidate.frequency} "
+                f"confidence={candidate.confidence:.2f}"
+            )
+    for result in report.results:
+        typer.echo(
+            f"  [{result.status}] {result.id} tier={result.tier} "
+            f"expected_success={result.expected_success} observed_success={result.observed_success}"
+        )
+        typer.echo(f"       goal: {result.goal}")
+        typer.echo(
+            f"       generated={result.generated_skill_id or '-'} "
+            f"used_in_plan={result.generated_skill_used_in_plan} "
+            f"reused_existing={result.reused_existing_skill_count} "
+            f"nodes={result.node_count} stopped={result.stopped_reason}"
+        )
+
+
 # ── helpers ──────────────────────────────────────────────────────────
 
 

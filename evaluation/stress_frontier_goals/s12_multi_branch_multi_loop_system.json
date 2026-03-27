@@ -1,0 +1,9 @@
+{
+  "id": "s12",
+  "goal": "For each dataset, compute summary statistics, branch on whether the mean is above a threshold, format the report differently for each branch, and then merge all reports into one ordered document",
+  "tier": 4,
+  "tags": ["loop", "branch", "math", "formatting", "extreme"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["missing_skill_not_detected", "semantic_fidelity_blocked", "replan_failed"],
+  "notes": "Extreme probe for nested decomposition, branching, math, formatting, and aggregation."
+}

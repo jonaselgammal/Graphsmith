@@ -56,6 +56,28 @@ graphsmith eval-frontier --goals evaluation/frontier_goals --registry "$REG" \
   --base-url https://api.groq.com/openai/v1
 ```
 
+## Stress frontier set (progressively harder probes)
+
+`evaluation/stress_frontier_goals/` pushes beyond the regular frontier to map
+where Graphsmith starts to break under longer, more heterogeneous tasks.
+
+It mixes:
+- moderate cases that should still succeed
+- harder cases that should fail cleanly for now
+- loop-heavy and branch-heavy workflows
+- programming-adjacent, math/statistics, and remote-policy probes
+
+Use it in isolated and cumulative modes:
+```bash
+graphsmith eval-stress-frontier --goals evaluation/stress_frontier_goals --registry "$REG" \
+  --backend ir --mode isolated --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
+
+graphsmith eval-stress-frontier --goals evaluation/stress_frontier_goals --registry "$REG" \
+  --backend ir --mode cumulative --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
+```
+
 ## Running evaluations via scripts
 
 The easiest way to run evaluations. Pass provider flags as arguments:
