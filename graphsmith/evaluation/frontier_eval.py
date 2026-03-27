@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from graphsmith.models.graph import GraphBody, GraphNode
 from graphsmith.planner.models import GlueGraph
 from graphsmith.registry.base import RegistryBackend
 from graphsmith.registry.local import LocalRegistry
@@ -77,9 +78,32 @@ def _select_result_graph(result) -> GlueGraph | None:
     return None
 
 
+def _iter_graph_nodes(body: GraphBody) -> list[GraphNode]:
+    nodes: list[GraphNode] = []
+    for node in body.nodes:
+        nodes.append(node)
+        if node.op != "parallel.map":
+            continue
+        config = node.config if isinstance(node.config, dict) else {}
+        if config.get("mode") != "inline_graph":
+            continue
+        raw_body = config.get("body")
+        if not isinstance(raw_body, dict):
+            continue
+        raw_graph = raw_body.get("graph")
+        if not isinstance(raw_graph, dict):
+            continue
+        try:
+            nested_body = GraphBody.model_validate(raw_graph)
+        except Exception:
+            continue
+        nodes.extend(_iter_graph_nodes(nested_body))
+    return nodes
+
+
 def _graph_skill_ids(graph: GlueGraph) -> list[str]:
     skill_ids: list[str] = []
-    for node in graph.graph.nodes:
+    for node in _iter_graph_nodes(graph.graph):
         if node.op == "skill.invoke" and isinstance(node.config, dict):
             skill_id = node.config.get("skill_id")
             if isinstance(skill_id, str):
@@ -97,7 +121,7 @@ def _evaluate_structure(case: FrontierCase, graph: GlueGraph | None, result) -> 
     skill_ids = _graph_skill_ids(graph)
     input_names = [field.name for field in graph.inputs]
     output_names = [field.name for field in graph.outputs]
-    node_count = len(graph.graph.nodes)
+    node_count = len(_iter_graph_nodes(graph.graph))
 
     for skill_id in case.required_skill_ids:
         if skill_id not in skill_ids:

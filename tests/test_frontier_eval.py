@@ -248,3 +248,91 @@ def test_evaluate_frontier_case_checks_required_inputs(monkeypatch) -> None:
 
     assert result.status == "pass"
     assert result.structural_pass
+
+
+def test_evaluate_frontier_case_recurses_into_inline_loop_body(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = LocalRegistry(tmpdir)
+
+        def fake_run_closed_loop(goal, backend, registry, *, output_dir=None, auto_approve=False, confirm_fn=None):
+            graph = GlueGraph(
+                goal=goal,
+                inputs=[IOField(name="paths", type="array<string>"), IOField(name="substring", type="string")],
+                outputs=[IOField(name="result", type="array<string>")],
+                effects=["filesystem_read", "pure"],
+                graph=GraphBody(
+                    version=1,
+                    nodes=[
+                        GraphNode(
+                            id="loop",
+                            op="parallel.map",
+                            config={
+                                "mode": "inline_graph",
+                                "op": "__inline_graph__",
+                                "item_inputs": ["path"],
+                                "aggregate_outputs": True,
+                                "body": {
+                                    "goal": "process each file",
+                                    "inputs": [
+                                        {"name": "path", "type": "string", "required": True},
+                                        {"name": "substring", "type": "string", "required": True},
+                                    ],
+                                    "outputs": [
+                                        {"name": "result", "type": "string", "required": True},
+                                    ],
+                                    "effects": ["filesystem_read", "pure"],
+                                    "graph": {
+                                        "version": 1,
+                                        "nodes": [
+                                            {
+                                                "id": "read",
+                                                "op": "skill.invoke",
+                                                "config": {"skill_id": "fs.read_text.v1", "version": "1.0.0"},
+                                            },
+                                            {
+                                                "id": "contains",
+                                                "op": "skill.invoke",
+                                                "config": {"skill_id": "text.contains.v1", "version": "1.0.0"},
+                                            },
+                                        ],
+                                        "edges": [
+                                            {"from": "input.path", "to": "read.path"},
+                                            {"from": "read.text", "to": "contains.text"},
+                                            {"from": "input.substring", "to": "contains.substring"},
+                                        ],
+                                        "outputs": {"result": "contains.result"},
+                                    },
+                                },
+                            },
+                        )
+                    ],
+                    edges=[],
+                    outputs={"result": "loop.result"},
+                ),
+            )
+            return ClosedLoopResult(
+                initial_status="failure",
+                replan_status="success",
+                replan_plan=graph,
+                stopped_reason="environment_fallback_succeeded",
+                success=True,
+            )
+
+        monkeypatch.setattr("graphsmith.evaluation.frontier_eval.run_closed_loop", fake_run_closed_loop)
+
+        case = FrontierCase(
+            id="loop",
+            goal="For each file in a list of paths, read it and check whether it contains a target phrase",
+            expected_success=True,
+            required_skill_ids=["fs.read_text.v1", "text.contains.v1"],
+            required_graph_inputs=["paths", "substring"],
+            required_output_names=["result"],
+            min_node_count=2,
+        )
+        result = evaluate_frontier_case(case, registry, backend=object())
+
+    assert result.status == "pass"
+    assert result.structural_pass
+    assert "fs.read_text.v1" in result.plan_skill_ids
+    assert "text.contains.v1" in result.plan_skill_ids
+    assert result.node_count == 3
