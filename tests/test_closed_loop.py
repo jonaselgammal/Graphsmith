@@ -1099,6 +1099,51 @@ class TestClosedLoopOrchestration:
         assert node_map["prefix_positive"].when == "is_positive.result"
         assert node_map["prefix_negative"].when == "!is_positive.result"
 
+    def test_branch_body_fallback_succeeds_for_sentiment_summarize_keywords_prefix(self) -> None:
+        class AlwaysFailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                "Classify the sentiment of this text, if it is positive summarize it, otherwise extract keywords, and prefix each resulting line with a label",
+                AlwaysFailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+
+        assert result.success
+        assert result.stopped_reason == "branch_fallback_succeeded"
+        assert result.replan_plan is not None
+        ids = [node.id for node in result.replan_plan.graph.nodes]
+        assert "positive_body" in ids
+        assert "negative_body" in ids
+        node_map = {node.id: node for node in result.replan_plan.graph.nodes}
+        assert node_map["positive_body"].config["skill_id"] == "text.summarize.v1"
+        assert node_map["negative_body"].config["skill_id"] == "text.extract_keywords.v1"
+        assert node_map["positive_body"].when == "is_positive.result"
+        assert node_map["negative_body"].when == "!is_positive.result"
+        assert {field.name for field in result.replan_plan.inputs} == {
+            "text",
+            "positive_prefix",
+            "negative_prefix",
+        }
+
     def test_normalizes_branch_shaped_initial_success_before_accepting(self) -> None:
         class ApproximateBranchBackend:
             _candidate_count = 1
@@ -1158,6 +1203,71 @@ class TestClosedLoopOrchestration:
         }
         node_ids = {node.id: node for node in result.initial_plan.graph.nodes}
         assert node_ids["merge_prefixed"].op == "fallback.try"
+
+    def test_branch_grounding_rejects_approximate_branch_body_success_and_falls_back(self) -> None:
+        class ApproximateBranchBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+                glue = GlueGraph(
+                    goal=request.goal,
+                    inputs=[IOField(name="text", type="string")],
+                    outputs=[IOField(name="prefixed", type="string")],
+                    effects=["llm_inference"],
+                    graph=GraphBody(
+                        version=1,
+                        nodes=[
+                            GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
+                            GraphNode(id="branch", op="branch.if"),
+                            GraphNode(id="summarize", op="skill.invoke", config={"skill_id": "text.summarize.v1"}),
+                            GraphNode(id="keywords", op="skill.invoke", config={"skill_id": "text.extract_keywords.v1"}),
+                            GraphNode(id="prefix", op="skill.invoke", config={"skill_id": "text.prefix_lines.v1"}),
+                        ],
+                        edges=[
+                            GraphEdge(from_="input.text", to="classify.text"),
+                            GraphEdge(from_="classify.sentiment", to="branch.condition"),
+                            GraphEdge(from_="input.text", to="summarize.text"),
+                            GraphEdge(from_="input.text", to="keywords.text"),
+                        ],
+                        outputs={"prefixed": "prefix.prefixed"},
+                    ),
+                )
+                return PlanResult(status="success", graph=glue)
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Classify the sentiment of this text, if it is positive summarize it, otherwise extract keywords, and prefix each resulting line with a label",
+            ApproximateBranchBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.success
+        assert result.stopped_reason == "branch_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.inputs} == {
+            "text",
+            "positive_prefix",
+            "negative_prefix",
+        }
+        node_ids = {node.id: node for node in result.replan_plan.graph.nodes}
+        assert node_ids["merge_prefixed"].op == "fallback.try"
+        assert node_ids["positive_body"].config["skill_id"] == "text.summarize.v1"
+        assert node_ids["negative_body"].config["skill_id"] == "text.extract_keywords.v1"
 
     def test_existing_skill_grounding_rejects_join_near_miss_and_falls_back(self) -> None:
         class JoinNearMissBackend:

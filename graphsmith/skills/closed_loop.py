@@ -261,6 +261,18 @@ def _goal_supports_structured_numeric_fallback(goal: str) -> bool:
     return "pretty_print" in decomp.content_transforms
 
 
+def _goal_matches_sentiment_branch_body_prefix(goal: str) -> bool:
+    goal_lower = goal.lower()
+    return (
+        "sentiment" in goal_lower
+        and "positive" in goal_lower
+        and ("otherwise" in goal_lower or "else" in goal_lower)
+        and ("summarize" in goal_lower or "summary" in goal_lower)
+        and "keyword" in goal_lower
+        and ("prefix each resulting line" in goal_lower or "prefix each line" in goal_lower)
+    )
+
+
 def _goal_matches_sentiment_branch_prefix(goal: str) -> bool:
     goal_lower = goal.lower()
     return (
@@ -294,6 +306,8 @@ def _autogen_conflicts_with_existing_pipeline(goal: str, spec: SkillSpec) -> boo
 def _semantic_fidelity_block_reason(goal: str) -> str:
     """Return a bounded reason when the goal exceeds current closed-loop fidelity."""
     if _goal_matches_sentiment_branch_prefix(goal):
+        return ""
+    if _goal_matches_sentiment_branch_body_prefix(goal):
         return ""
     if _goal_supports_structured_numeric_fallback(goal):
         return ""
@@ -713,47 +727,121 @@ def _build_structured_numeric_fallback_plan(
 
 def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
     """Build a bounded branch fallback for sentiment-conditioned prefix formatting."""
+    return _build_sentiment_branch_formatter_plan(goal, registry)
+
+
+def _build_sentiment_branch_formatter_plan(
+    goal: str,
+    registry: RegistryBackend,
+    *,
+    positive_body_skill_id: str | None = None,
+    negative_body_skill_id: str | None = None,
+) -> GlueGraph | None:
+    """Build a bounded sentiment-gated branch with optional per-branch body skills."""
     from graphsmith.models.common import IOField
     from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
 
-    goal_lower = goal.lower()
-    if not _goal_matches_sentiment_branch_prefix(goal):
-        return None
+    if positive_body_skill_id is None and negative_body_skill_id is None:
+        if not _goal_matches_sentiment_branch_prefix(goal):
+            return None
+    else:
+        if not _goal_matches_sentiment_branch_body_prefix(goal):
+            return None
 
     required = {"text.classify_sentiment.v1", "text.prefix_lines.v1"}
+    if positive_body_skill_id:
+        required.add(positive_body_skill_id)
+    if negative_body_skill_id:
+        required.add(negative_body_skill_id)
     available = {entry.id for entry in registry.list_all()} if hasattr(registry, "list_all") else set()
     if not required.issubset(available):
         return None
 
-    nodes = [
+    def _single_output_port(skill_id: str) -> str | None:
+        entry = _find_registry_entry(registry, skill_id)
+        if entry is None:
+            return None
+        try:
+            pkg = registry.fetch(entry.id, entry.version)
+        except Exception:
+            return None
+        if len(pkg.skill.outputs) != 1:
+            return None
+        return pkg.skill.outputs[0].name
+
+    effects = {"llm_inference", "pure"}
+    nodes: list[GraphNode] = [
         GraphNode(id="classify", op="skill.invoke", config={"skill_id": "text.classify_sentiment.v1"}),
         GraphNode(id="positive_label", op="template.render", config={"template": "positive"}),
         GraphNode(id="is_positive", op="text.equals"),
-        GraphNode(
-            id="prefix_positive",
-            op="skill.invoke",
-            config={"skill_id": "text.prefix_lines.v1"},
-            when="is_positive.result",
-        ),
-        GraphNode(
-            id="prefix_negative",
-            op="skill.invoke",
-            config={"skill_id": "text.prefix_lines.v1"},
-            when="!is_positive.result",
-        ),
-        GraphNode(id="merge_prefixed", op="fallback.try"),
     ]
-    edges = [
+    edges: list[GraphEdge] = [
         GraphEdge(from_="input.text", to="classify.text"),
         GraphEdge(from_="classify.sentiment", to="is_positive.text"),
         GraphEdge(from_="positive_label.rendered", to="is_positive.other"),
-        GraphEdge(from_="input.text", to="prefix_positive.text"),
-        GraphEdge(from_="input.positive_prefix", to="prefix_positive.prefix"),
-        GraphEdge(from_="input.text", to="prefix_negative.text"),
-        GraphEdge(from_="input.negative_prefix", to="prefix_negative.prefix"),
-        GraphEdge(from_="prefix_positive.prefixed", to="merge_prefixed.primary"),
-        GraphEdge(from_="prefix_negative.prefixed", to="merge_prefixed.fallback"),
     ]
+
+    positive_text_source = "input.text"
+    negative_text_source = "input.text"
+
+    if positive_body_skill_id is not None:
+        positive_port = _single_output_port(positive_body_skill_id)
+        if positive_port is None:
+            return None
+        nodes.append(
+            GraphNode(
+                id="positive_body",
+                op="skill.invoke",
+                config={"skill_id": positive_body_skill_id},
+                when="is_positive.result",
+            )
+        )
+        edges.append(GraphEdge(from_="input.text", to="positive_body.text"))
+        positive_text_source = f"positive_body.{positive_port}"
+
+    if negative_body_skill_id is not None:
+        negative_port = _single_output_port(negative_body_skill_id)
+        if negative_port is None:
+            return None
+        nodes.append(
+            GraphNode(
+                id="negative_body",
+                op="skill.invoke",
+                config={"skill_id": negative_body_skill_id},
+                when="!is_positive.result",
+            )
+        )
+        edges.append(GraphEdge(from_="input.text", to="negative_body.text"))
+        negative_text_source = f"negative_body.{negative_port}"
+
+    nodes.extend(
+        [
+            GraphNode(
+                id="prefix_positive",
+                op="skill.invoke",
+                config={"skill_id": "text.prefix_lines.v1"},
+                when="is_positive.result",
+            ),
+            GraphNode(
+                id="prefix_negative",
+                op="skill.invoke",
+                config={"skill_id": "text.prefix_lines.v1"},
+                when="!is_positive.result",
+            ),
+            GraphNode(id="merge_prefixed", op="fallback.try"),
+        ]
+    )
+    edges.extend(
+        [
+            GraphEdge(from_=positive_text_source, to="prefix_positive.text"),
+            GraphEdge(from_="input.positive_prefix", to="prefix_positive.prefix"),
+            GraphEdge(from_=negative_text_source, to="prefix_negative.text"),
+            GraphEdge(from_="input.negative_prefix", to="prefix_negative.prefix"),
+            GraphEdge(from_="prefix_positive.prefixed", to="merge_prefixed.primary"),
+            GraphEdge(from_="prefix_negative.prefixed", to="merge_prefixed.fallback"),
+        ]
+    )
+
     return GlueGraph(
         goal=goal,
         inputs=[
@@ -762,13 +850,23 @@ def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) 
             IOField(name="negative_prefix", type="string"),
         ],
         outputs=[IOField(name="prefixed", type="string")],
-        effects=["llm_inference", "pure"],
+        effects=sorted(effects),
         graph=GraphBody(
             version=1,
             nodes=nodes,
             edges=edges,
             outputs={"prefixed": "merge_prefixed.result"},
         ),
+    )
+
+
+def _build_sentiment_branch_body_fallback_plan(goal: str, registry: RegistryBackend) -> GlueGraph | None:
+    """Build a bounded branch fallback with distinct per-branch body skills."""
+    return _build_sentiment_branch_formatter_plan(
+        goal,
+        registry,
+        positive_body_skill_id="text.summarize.v1",
+        negative_body_skill_id="text.extract_keywords.v1",
     )
 
 
@@ -831,6 +929,36 @@ def _existing_skill_grounding_failure(
     return ""
 
 
+def _branch_region_grounding_failure(
+    graph: GlueGraph | None,
+    goal: str,
+) -> str:
+    """Detect branch-region plans that are missing required public inputs or canonical structure."""
+    if graph is None:
+        return ""
+    if not (
+        _goal_matches_sentiment_branch_prefix(goal)
+        or _goal_matches_sentiment_branch_body_prefix(goal)
+    ):
+        return ""
+
+    graph_inputs = {field.name for field in graph.inputs}
+    required_inputs = {"text", "positive_prefix", "negative_prefix"}
+    missing_inputs = sorted(required_inputs - graph_inputs)
+    if missing_inputs:
+        return "missing_branch_inputs:" + ",".join(missing_inputs)
+
+    skill_ids = set(_graph_skill_ids(graph))
+    required_skill_ids = {"text.classify_sentiment.v1", "text.prefix_lines.v1", "fallback.try"}
+    if _goal_matches_sentiment_branch_body_prefix(goal):
+        required_skill_ids.update({"text.summarize.v1", "text.extract_keywords.v1"})
+    missing_skill_ids = sorted(skill_id for skill_id in required_skill_ids if skill_id not in skill_ids)
+    if missing_skill_ids:
+        return "missing_branch_skills:" + ",".join(missing_skill_ids)
+
+    return ""
+
+
 # ── Orchestrator ─────────────────────────────────────────────────
 
 
@@ -880,6 +1008,7 @@ def run_closed_loop(
         plan_result = plan_result.model_copy(update={"graph": normalized_graph})
     plan_grounding_failure = _exact_skill_grounding_failure(plan_result.graph, exact_spec)
     existing_grounding_failure = _existing_skill_grounding_failure(plan_result.graph, goal)
+    branch_grounding_failure = _branch_region_grounding_failure(plan_result.graph, goal)
 
     result.initial_status = plan_result.status
     result.initial_plan = plan_result.graph
@@ -895,12 +1024,15 @@ def run_closed_loop(
         and plan_result.graph is not None
         and not plan_grounding_failure
         and not existing_grounding_failure
+        and not branch_grounding_failure
     ):
         result.stopped_reason = "initial_plan_succeeded"
         result.success = True
         return result
 
-    branch_fallback = _build_sentiment_branch_fallback_plan(goal, registry)
+    branch_fallback = _build_sentiment_branch_body_fallback_plan(goal, registry)
+    if branch_fallback is None:
+        branch_fallback = _build_sentiment_branch_fallback_plan(goal, registry)
     if branch_fallback is not None:
         result.replan_status = "success"
         result.replan_plan = branch_fallback
@@ -1037,6 +1169,8 @@ def run_closed_loop(
         diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {plan_grounding_failure}"
     if existing_grounding_failure:
         diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {existing_grounding_failure}"
+    if branch_grounding_failure:
+        diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {branch_grounding_failure}"
     result.detected_missing = diagnosis.is_missing
     result.diagnosis_reason = diagnosis.reason
 
