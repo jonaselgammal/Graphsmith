@@ -139,6 +139,11 @@ explicit. Common stop reasons are:
   `published-only` and `trusted published only` requests, passes them into the
   planner prompt, filters retrieval when provenance metadata is available, and
   refuses to claim success by generating a new skill when the goal forbids it.
+- Closed-loop now rejects a class of executable-but-wrong plans where the model
+  substitutes a near-miss predicate or formatter for the exact missing
+  generated capability. If a successful graph omits the exact requested
+  generated skill or its required public inputs, Graphsmith continues into the
+  bounded repair/generation path instead of accepting the first plan.
 
 For smoke testing, `--provider echo` is useful because it exercises the
 bounded loop without a live API key. In that mode, a stop reason of

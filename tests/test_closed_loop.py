@@ -263,6 +263,82 @@ class TestClosedLoopOrchestration:
         assert not result.success
         assert result.stopped_reason == "semantic_fidelity_blocked"
 
+    def test_exact_skill_grounding_rejects_near_miss_success_and_falls_back(self) -> None:
+        class NearMissBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+            _call_count = 0
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                self._call_count += 1
+                from graphsmith.models.common import IOField
+                from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
+
+                return PlanResult(
+                    status="success",
+                    graph=GlueGraph(
+                        goal=request.goal,
+                        inputs=[
+                            IOField(name="text", type="string"),
+                            IOField(name="phrase", type="string"),
+                        ],
+                        outputs=[
+                            IOField(name="normalized", type="string"),
+                            IOField(name="summary", type="string"),
+                            IOField(name="contains_phrase", type="boolean"),
+                        ],
+                        effects=["pure", "llm_inference"],
+                        graph=GraphBody(
+                            version=1,
+                            nodes=[
+                                GraphNode(id="normalize", op="skill.invoke", config={"skill_id": "text.normalize.v1"}),
+                                GraphNode(id="summarize", op="skill.invoke", config={"skill_id": "text.summarize.v1"}),
+                                GraphNode(id="contains", op="text.equals"),
+                            ],
+                            edges=[
+                                GraphEdge(from_="input.text", to="normalize.text"),
+                                GraphEdge(from_="normalize.normalized", to="summarize.text"),
+                                GraphEdge(from_="summarize.summary", to="contains.text"),
+                                GraphEdge(from_="input.phrase", to="contains.other"),
+                            ],
+                            outputs={
+                                "normalized": "normalize.normalized",
+                                "summary": "summarize.summary",
+                                "contains_phrase": "contains.result",
+                            },
+                        ),
+                    ),
+                )
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Normalize this text, summarize it, and check whether the summary contains a phrase",
+            NearMissBackend(),
+            reg,
+            auto_approve=True,
+        )
+
+        assert result.generated_spec is not None
+        assert result.generated_spec.skill_id == "text.contains.v1"
+        assert result.success
+        assert result.stopped_reason == "multi_stage_fallback_succeeded"
+        assert result.replan_plan is not None
+        skill_ids = []
+        for node in result.replan_plan.graph.nodes:
+            if node.op == "skill.invoke":
+                skill_ids.append(node.config["skill_id"])
+        assert "text.contains.v1" in skill_ids
+
     def test_semantic_fidelity_blocks_published_only_generation(self) -> None:
         class AlwaysFailBackend:
             _candidate_count = 3

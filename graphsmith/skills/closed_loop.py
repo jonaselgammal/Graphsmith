@@ -496,6 +496,48 @@ def _build_sentiment_branch_fallback_plan(goal: str, registry: RegistryBackend) 
     )
 
 
+def _graph_skill_ids(graph: GlueGraph) -> list[str]:
+    skill_ids: list[str] = []
+    body = getattr(graph, "graph", None)
+    nodes = getattr(body, "nodes", None)
+    if not nodes:
+        return skill_ids
+    for node in nodes:
+        if node.op == "skill.invoke" and isinstance(node.config, dict):
+            skill_id = node.config.get("skill_id")
+            if isinstance(skill_id, str):
+                skill_ids.append(skill_id)
+        else:
+            skill_ids.append(node.op)
+    return skill_ids
+
+
+def _exact_skill_grounding_failure(
+    graph: GlueGraph | None,
+    spec: SkillSpec | None,
+) -> str:
+    """Detect when a plan is executable but misses the exact requested capability."""
+    if graph is None or spec is None:
+        return ""
+
+    skill_ids = set(_graph_skill_ids(graph))
+    if not skill_ids:
+        return ""
+    if spec.skill_id not in skill_ids:
+        return f"missing_exact_skill:{spec.skill_id}"
+
+    graph_inputs = {field.name for field in graph.inputs}
+    missing_inputs = [
+        inp["name"]
+        for inp in spec.inputs
+        if inp.get("required", True) and inp["name"] not in graph_inputs
+    ]
+    if missing_inputs:
+        return "missing_exact_skill_inputs:" + ",".join(sorted(missing_inputs))
+
+    return ""
+
+
 # ── Orchestrator ─────────────────────────────────────────────────
 
 
@@ -537,6 +579,7 @@ def run_closed_loop(
         cands = filter_candidates_by_goal_policy(cands, goal)
     request = PlanRequest(goal=goal, candidates=cands, constraints=derive_goal_constraints(goal))
     plan_result = backend.compose(request)
+    plan_grounding_failure = _exact_skill_grounding_failure(plan_result.graph, exact_spec)
 
     result.initial_status = plan_result.status
     result.initial_plan = plan_result.graph
@@ -547,6 +590,11 @@ def run_closed_loop(
             result.stopped_reason = block_reason
             result.success = False
             return result
+    if (
+        plan_result.status == "success"
+        and plan_result.graph is not None
+        and not plan_grounding_failure
+    ):
         result.stopped_reason = "initial_plan_succeeded"
         result.success = True
         return result
@@ -574,10 +622,12 @@ def run_closed_loop(
             pass
     diagnosis = detect_missing_skill(
         goal,
-        plan_result,
+        plan_result if not plan_grounding_failure else PlanResult(status="failure", graph=plan_result.graph),
         backend.last_candidates,
         available_skill_ids=available_ids,
     )
+    if plan_grounding_failure:
+        diagnosis.reason = f"{diagnosis.reason}; initial plan mismatch: {plan_grounding_failure}"
     result.detected_missing = diagnosis.is_missing
     result.diagnosis_reason = diagnosis.reason
 
@@ -592,9 +642,14 @@ def run_closed_loop(
             constraints=derive_goal_constraints(goal),
         )
         retry_result = backend.compose(retry_request)
+        retry_grounding_failure = _exact_skill_grounding_failure(retry_result.graph, exact_spec)
         result.replan_status = retry_result.status
         result.replan_plan = retry_result.graph
-        if retry_result.status == "success" and retry_result.graph is not None:
+        if (
+            retry_result.status == "success"
+            and retry_result.graph is not None
+            and not retry_grounding_failure
+        ):
             block_reason = _semantic_fidelity_block_reason(goal)
             if block_reason:
                 result.stopped_reason = block_reason
@@ -712,10 +767,15 @@ def run_closed_loop(
             constraints=derive_goal_constraints(goal),
         )
         replan_result = backend.compose(request)
+        replan_grounding_failure = _exact_skill_grounding_failure(replan_result.graph, spec)
 
         result.replan_status = replan_result.status
         result.replan_plan = replan_result.graph
-        result.success = replan_result.status == "success" and replan_result.graph is not None
+        result.success = (
+            replan_result.status == "success"
+            and replan_result.graph is not None
+            and not replan_grounding_failure
+        )
         if result.success:
             block_reason = _semantic_fidelity_block_reason(goal)
             if block_reason:
