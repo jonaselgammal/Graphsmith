@@ -1,0 +1,11 @@
+{
+  "id": "p04",
+  "goal": "Read a file, title case it, write it to a new file, and then run pytest in the project",
+  "tier": 2,
+  "tags": ["coding", "environment", "multi_region"],
+  "expected_success": true,
+  "required_graph_inputs": ["input_path", "output_path", "cwd"],
+  "required_output_names": ["stdout"],
+  "min_node_count": 2,
+  "notes": "Multi-region coding workflow that should synthesize and later reuse higher-level units."
+}

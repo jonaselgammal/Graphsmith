@@ -1,0 +1,12 @@
+{
+  "id": "p02",
+  "goal": "Run pytest in this project folder and return the test output",
+  "tier": 1,
+  "tags": ["coding", "testing", "shell"],
+  "expected_success": true,
+  "required_skill_ids": ["dev.run_pytest.v1"],
+  "required_graph_inputs": ["cwd"],
+  "required_output_names": ["stdout"],
+  "min_node_count": 1,
+  "notes": "Baseline tool-execution task."
+}

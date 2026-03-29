@@ -1,0 +1,12 @@
+{
+  "id": "p03",
+  "goal": "Read a file, replace one substring with another, and write the edited text back to a new file",
+  "tier": 1,
+  "tags": ["coding", "filesystem", "editing"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.replace.v1", "fs.write_text.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "old", "new"],
+  "required_output_names": ["path"],
+  "min_node_count": 3,
+  "notes": "Baseline edit pipeline with one generated transform."
+}

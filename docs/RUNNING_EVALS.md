@@ -121,6 +121,25 @@ Interpretation:
 - `cumulative` shows whether the registry gets better as generated skills accumulate
 - promotion candidates point to repeated multi-step fragments that may now be worth promoting
 
+## 7b. Run the programming replacement pressure suite
+
+This is the best current probe for the question: can Graphsmith start to feel
+like a replacement for direct coding on bounded tasks?
+
+```bash
+graphsmith eval-stress-frontier --goals evaluation/programming_replacement_goals --registry "$REG" \
+  --backend ir --mode isolated --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1 --output-format json
+
+graphsmith eval-stress-frontier --goals evaluation/programming_replacement_goals --registry "$REG" \
+  --backend ir --mode cumulative --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1 --output-format json
+```
+
+Interpretation:
+- success on tiers 1-3 means Graphsmith is acting like a real bounded programming substrate
+- failure on tiers 4-5 shows where it still lacks richer state, iteration, or broader multi-file reasoning
+
 ## 8. Compare planners (direct vs IR)
 
 ```bash

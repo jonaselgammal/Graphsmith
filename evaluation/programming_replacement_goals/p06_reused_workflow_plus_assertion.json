@@ -1,0 +1,12 @@
+{
+  "id": "p06",
+  "goal": "Read a file, title case it, write it to a new file, run pytest in the project, and check whether the test output contains a phrase",
+  "tier": 2,
+  "tags": ["coding", "environment", "synth_reuse", "generated"],
+  "expected_success": true,
+  "required_skill_ids": ["text.contains.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "cwd", "substring"],
+  "required_output_names": ["result"],
+  "min_node_count": 2,
+  "notes": "Reused synthesized coding workflow plus a generated assertion."
+}

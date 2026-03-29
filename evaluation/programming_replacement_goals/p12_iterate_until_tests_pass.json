@@ -1,0 +1,9 @@
+{
+  "id": "p12",
+  "goal": "Read a file, modify it, run pytest, and keep trying different fixes until the tests pass",
+  "tier": 5,
+  "tags": ["coding", "iteration", "state", "repair"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["semantic_fidelity_blocked", "missing_skill_not_detected", "replan_failed"],
+  "notes": "Explicit clean-failure probe for iterative search/stateful coding loops that should remain out of scope for now."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "p11",
+  "goal": "Read a file, replace one phrase with another, write it back, run pytest, and summarize the test output",
+  "tier": 4,
+  "tags": ["coding", "environment", "multi_region", "llm"],
+  "expected_success": true,
+  "required_skill_ids": ["fs.read_text.v1", "text.replace.v1", "fs.write_text.v1", "dev.run_pytest.v1", "text.summarize.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "old", "new", "cwd"],
+  "required_output_names": ["summary"],
+  "min_node_count": 5,
+  "notes": "Edit plus test plus semantic report in one workflow."
+}

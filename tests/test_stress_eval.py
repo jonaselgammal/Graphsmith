@@ -25,6 +25,7 @@ from graphsmith.skills.closed_loop import ClosedLoopResult
 
 
 STRESS_DIR = Path(__file__).resolve().parent.parent / "evaluation" / "stress_frontier_goals"
+PROGRAMMING_DIR = Path(__file__).resolve().parent.parent / "evaluation" / "programming_replacement_goals"
 
 
 def test_load_stress_cases() -> None:
@@ -32,6 +33,13 @@ def test_load_stress_cases() -> None:
     assert len(cases) == 12
     assert cases[0].id == "s01"
     assert cases[-1].id == "s12"
+
+
+def test_load_programming_replacement_cases() -> None:
+    cases = load_stress_cases(PROGRAMMING_DIR)
+    assert len(cases) == 13
+    assert cases[0].id == "p01"
+    assert cases[-1].id == "p13"
 
 
 def test_run_stress_suite_aggregates_results(monkeypatch) -> None:

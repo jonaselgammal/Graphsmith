@@ -96,6 +96,30 @@ graphsmith eval-frontier --goals evaluation/coding_frontier_goals --registry "$R
   --base-url https://api.groq.com/openai/v1
 ```
 
+## Programming replacement pressure set
+
+`evaluation/programming_replacement_goals/` is a focused stress suite for the
+question: how close is Graphsmith to replacing direct coding on small and
+medium programming workflows?
+
+It mixes:
+- file edit and test pipelines
+- synthesized coding-workflow reuse
+- branch and loop control over environment tasks
+- multi-region coding workflows
+- explicit clean-failure probes for still-missing iterative/stateful behavior
+
+Use it with the stress harness in isolated and cumulative modes:
+```bash
+graphsmith eval-stress-frontier --goals evaluation/programming_replacement_goals --registry "$REG" \
+  --backend ir --mode isolated --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
+
+graphsmith eval-stress-frontier --goals evaluation/programming_replacement_goals --registry "$REG" \
+  --backend ir --mode cumulative --provider openai --model llama-3.1-8b-instant \
+  --base-url https://api.groq.com/openai/v1
+```
+
 ## Running evaluations via scripts
 
 The easiest way to run evaluations. Pass provider flags as arguments:

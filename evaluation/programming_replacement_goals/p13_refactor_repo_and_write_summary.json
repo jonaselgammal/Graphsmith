@@ -1,0 +1,9 @@
+{
+  "id": "p13",
+  "goal": "Read several source files, refactor duplicated code into a shared helper, run pytest, and write a summary of the changes",
+  "tier": 5,
+  "tags": ["coding", "multi_file", "refactor", "state"],
+  "expected_success": false,
+  "accepted_stop_reasons": ["semantic_fidelity_blocked", "missing_skill_not_detected", "replan_failed"],
+  "notes": "Explicit clean-failure probe for multi-file stateful refactoring and broader codebase reasoning."
+}

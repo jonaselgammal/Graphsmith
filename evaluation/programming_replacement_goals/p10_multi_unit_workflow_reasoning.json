@@ -1,0 +1,12 @@
+{
+  "id": "p10",
+  "goal": "Read a file, title case it, write it to a new file, run pytest in the project, format the output, and check whether it contains a phrase",
+  "tier": 4,
+  "tags": ["coding", "environment", "multi_unit", "generated"],
+  "expected_success": true,
+  "required_skill_ids": ["text.contains.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "cwd", "substring"],
+  "required_output_names": ["result"],
+  "min_node_count": 3,
+  "notes": "Multi-unit chain over a reused synthesized workflow plus additional reasoning."
+}
