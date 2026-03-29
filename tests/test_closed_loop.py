@@ -876,6 +876,126 @@ class TestClosedLoopOrchestration:
         assert {field.name for field in result.replan_plan.inputs} == {"paths", "substring"}
         assert {field.name for field in result.replan_plan.outputs} == {"result"}
 
+    def test_environment_fallback_reused_workflow_plus_contains_generates_contains(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.contains.v1"})
+        goal = (
+            "Read a file, title case it, write it to a new file, run pytest in the project, "
+            "and check whether the test output contains a phrase"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_closed_loop(
+                goal,
+                FailBackend(),
+                reg,
+                output_dir=tmpdir,
+                auto_approve=True,
+            )
+        assert result.success
+        assert result.generated_spec is not None
+        assert result.generated_spec.skill_id == "text.contains.v1"
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.inputs} == {
+            "input_path", "output_path", "cwd", "substring",
+        }
+        assert {field.name for field in result.replan_plan.outputs} == {"result"}
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert "text.contains.v1" in skill_ids
+
+    def test_environment_fallback_run_pytest_summarize_report_succeeds(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without()
+        result = run_closed_loop(
+            "Run pytest in this project, summarize the output, and write the summary to a report file",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.inputs} == {"cwd", "report_path"}
+        assert {field.name for field in result.replan_plan.outputs} == {"path"}
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert {"dev.run_pytest.v1", "text.summarize.v1", "fs.write_text.v1"}.issubset(skill_ids)
+
+    def test_environment_fallback_read_replace_write_then_pytest_summarize_generates_replace(self) -> None:
+        class FailBackend:
+            _candidate_count = 1
+            _use_decomposition = False
+            _last_candidates: list[CandidateResult] = []
+            _last_decomposition = None
+
+            @property
+            def last_candidates(self):
+                return self._last_candidates
+
+            @property
+            def last_decomposition(self):
+                return self._last_decomposition
+
+            def compose(self, request):
+                return PlanResult(status="failure")
+
+        reg, _ = self._make_registry_without({"text.replace.v1"})
+        result = run_closed_loop(
+            "Read a file, replace one substring with another, write the edited text to a new file, "
+            "run pytest in the project, and summarize the test output",
+            FailBackend(),
+            reg,
+            auto_approve=True,
+        )
+        assert result.success
+        assert result.generated_spec is not None
+        assert result.generated_spec.skill_id == "text.replace.v1"
+        assert result.stopped_reason == "environment_fallback_succeeded"
+        assert result.replan_plan is not None
+        assert {field.name for field in result.replan_plan.inputs} == {
+            "input_path", "output_path", "old", "new", "cwd",
+        }
+        assert {field.name for field in result.replan_plan.outputs} == {"summary"}
+        skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
+        assert {
+            "fs.read_text.v1",
+            "text.replace.v1",
+            "fs.write_text.v1",
+            "dev.run_pytest.v1",
+            "text.summarize.v1",
+        }.issubset(skill_ids)
+
     def test_exact_skill_grounding_rejects_near_miss_success_and_falls_back(self) -> None:
         class NearMissBackend:
             _candidate_count = 1
