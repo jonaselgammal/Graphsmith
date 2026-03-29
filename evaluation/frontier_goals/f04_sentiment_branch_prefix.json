@@ -1,12 +1,11 @@
 {
   "id": "f04",
-  "goal": "Classify the sentiment of this text and if it is positive prefix each line with one label, otherwise prefix each line with a different label",
+  "goal": "Read a file, title case it, write it to a new file, and then run pytest in the project",
   "tier": 2,
-  "tags": ["branch", "sentiment", "text", "formatting"],
+  "tags": ["coding", "environment", "synth_reuse"],
   "expected_success": true,
-  "required_skill_ids": ["text.classify_sentiment.v1", "text.prefix_lines.v1", "fallback.try"],
-  "required_graph_inputs": ["positive_prefix", "negative_prefix"],
-  "required_output_names": ["prefixed"],
-  "min_node_count": 5,
-  "notes": "Near-frontier structural branch fallback with sentiment-conditioned formatting."
+  "required_graph_inputs": ["input_path", "output_path", "cwd"],
+  "required_output_names": ["stdout"],
+  "min_node_count": 1,
+  "notes": "Reused synthesized coding workflow should be planner-visible as a single higher-level unit."
 }

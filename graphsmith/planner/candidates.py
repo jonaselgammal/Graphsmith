@@ -246,6 +246,7 @@ def _relevance_score(
         elif t in all_stems:
             score += 1
     score += _structural_synth_bonus(entry, token_set=set(tokens))
+    score += _quality_signal_bonus(entry)
     return score
 
 
@@ -265,6 +266,21 @@ def _structural_synth_bonus(entry: IndexEntry, *, token_set: set[str]) -> int:
         and ("prefix" in token_set or "format" in token_set)
     ):
         bonus += 4
+    return bonus
+
+
+def _quality_signal_bonus(entry: IndexEntry) -> int:
+    """Small deterministic preference for better-validated reusable skills."""
+    tags = set(entry.tags)
+    bonus = 0
+    if "smoke_tested" in tags:
+        bonus += 2
+    if "promoted" in tags:
+        bonus += 2
+    if "validated" in tags:
+        bonus += 1
+    if entry.source_kind == "remote" and (entry.trust_score or 0.0) >= 0.8:
+        bonus += 1
     return bonus
 
 

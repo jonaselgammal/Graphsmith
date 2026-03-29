@@ -1,11 +1,12 @@
 {
   "id": "f10",
-  "goal": "Classify the sentiment of this text, if it is positive summarize it, otherwise extract keywords, and prefix each resulting line with a label",
+  "goal": "For each file path, read the file and check whether its contents contain a phrase",
   "tier": 3,
-  "tags": ["branch", "llm", "text", "formatting"],
+  "tags": ["loop", "coding", "environment", "generated"],
   "expected_success": true,
-  "required_skill_ids": ["text.classify_sentiment.v1", "text.summarize.v1", "text.extract_keywords.v1", "text.prefix_lines.v1"],
-  "required_graph_inputs": ["positive_prefix", "negative_prefix"],
-  "min_node_count": 5,
-  "notes": "Branch-plus-LLM region with different branch bodies and shared formatting."
+  "required_skill_ids": ["fs.read_text.v1", "text.contains.v1"],
+  "required_graph_inputs": ["paths", "substring"],
+  "required_output_names": ["result"],
+  "min_node_count": 3,
+  "notes": "Looped file workflow plus generated predicate."
 }

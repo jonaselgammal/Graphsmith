@@ -1,10 +1,12 @@
 {
   "id": "f05",
-  "goal": "Normalize this text, sort the lines, remove duplicates, and join the lines back together",
+  "goal": "Read a file, title case it, write it to a new file, run pytest in the project, and prefix each line of the test output",
   "tier": 2,
-  "tags": ["pipeline", "text", "deterministic", "programming_adjacent"],
+  "tags": ["coding", "environment", "synth_reuse", "formatter"],
   "expected_success": true,
-  "required_skill_ids": ["text.normalize.v1", "text.sort_lines.v1", "text.remove_duplicates.v1", "text.join_lines.v1"],
-  "min_node_count": 4,
-  "notes": "Near-frontier deterministic existing-skill pipeline."
+  "required_skill_ids": ["text.prefix_lines.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "cwd", "prefix"],
+  "required_output_names": ["prefixed"],
+  "min_node_count": 2,
+  "notes": "Reused synthesized coding workflow plus one adjacent existing formatter."
 }

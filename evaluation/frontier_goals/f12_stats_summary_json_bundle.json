@@ -1,11 +1,11 @@
 {
   "id": "f12",
-  "goal": "Compute the median and maximum of these numbers, format both values into readable JSON, and check whether the JSON contains a phrase",
+  "goal": "For each JSON object, extract the value field, pretty print it as JSON, and check whether the formatted result contains a phrase",
   "tier": 3,
-  "tags": ["math", "stats", "json", "multi_generated"],
+  "tags": ["loop", "json", "text", "generated"],
   "expected_success": true,
-  "required_skill_ids": ["math.median.v1", "math.max.v1", "json.pretty_print.v1", "text.contains.v1"],
+  "required_skill_ids": ["json.extract_field.v1", "json.pretty_print.v1", "text.contains.v1"],
   "required_graph_inputs": ["substring"],
-  "min_node_count": 4,
-  "notes": "Multiple numeric capabilities plus JSON assembly and a generated predicate."
+  "min_node_count": 3,
+  "notes": "Loop plus structured formatting plus generated predicate remains a broad mixed-data boundary case."
 }

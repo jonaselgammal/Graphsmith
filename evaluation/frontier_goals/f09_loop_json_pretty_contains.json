@@ -1,11 +1,11 @@
 {
   "id": "f09",
-  "goal": "For each JSON object, extract the value field, pretty print it as JSON, and check whether the formatted result contains a phrase",
+  "goal": "If pytest passes, prefix each line of the output with one label, otherwise summarize the output and prefix it with another label",
   "tier": 3,
-  "tags": ["loop", "json", "text", "generated"],
+  "tags": ["branch", "coding", "environment", "llm"],
   "expected_success": true,
-  "required_skill_ids": ["json.extract_field.v1", "json.pretty_print.v1", "text.contains.v1"],
-  "required_graph_inputs": ["substring"],
-  "min_node_count": 3,
-  "notes": "Loop plus JSON formatting plus generated predicate."
+  "required_skill_ids": ["dev.run_pytest.v1", "text.prefix_lines.v1", "text.summarize.v1"],
+  "required_graph_inputs": ["cwd", "positive_prefix", "negative_prefix"],
+  "min_node_count": 5,
+  "notes": "Branch-style environment workflow with different downstream bodies and shared formatting pressure."
 }

@@ -926,7 +926,7 @@ class TestIRBackend:
             "synth.file_transform_write_pytest_workflow.v1",
             "text.prefix_lines.v1",
         }
-        assert result.graph.graph.outputs == {"prefixed": "followup.prefixed"}
+        assert result.graph.graph.outputs == {"prefixed": "followup_1.prefixed"}
 
     def test_backend_composes_reused_synthesized_workflow_with_generated_assertion_without_llm(
         self,
@@ -973,10 +973,79 @@ class TestIRBackend:
 
         assert result.status == "success"
         assert result.graph is not None
-        assert result.graph.graph.outputs == {"result": "followup.result"}
+        assert result.graph.graph.outputs == {"result": "followup_1.result"}
         edge_addrs = {(edge.from_, edge.to) for edge in result.graph.graph.edges}
-        assert ("workflow.stdout", "followup.text") in edge_addrs
-        assert ("input.substring", "followup.substring") in edge_addrs
+        assert ("workflow.stdout", "followup_1.text") in edge_addrs
+        assert ("input.substring", "followup_1.substring") in edge_addrs
+
+    def test_backend_composes_multi_unit_chain_over_reused_synthesized_workflow(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        candidates = [
+            IndexEntry(
+                id="synth.file_transform_write_pytest_workflow.v1",
+                name="Synth Workflow",
+                version="1.0.0",
+                description="file workflow",
+                tags=[
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "workflow:file_transform_write_pytest", "coding", "environment", "smoke_tested",
+                ],
+                effects=["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                input_names=["input_path", "output_path", "cwd"],
+                output_names=["stdout"],
+            ),
+            IndexEntry(
+                id="synth.format_region.v1",
+                name="Format Region",
+                version="1.0.0",
+                description="format output region",
+                tags=[
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "region:format_output", "smoke_tested",
+                ],
+                effects=["pure"],
+                input_names=["stdout"],
+                output_names=["prefixed"],
+            ),
+            IndexEntry(
+                id="text.contains.v1",
+                name="Contains",
+                version="1.0.0",
+                description="Check whether text contains a phrase.",
+                tags=["text", "contains"],
+                effects=["pure"],
+                input_names=["text", "substring"],
+                output_names=["result"],
+            ),
+        ]
+
+        class CrashProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                raise AssertionError("provider should not be called for structural synth reuse")
+
+        backend = IRPlannerBackend(CrashProvider())  # type: ignore[arg-type]
+        result = backend.compose(
+            PlanRequest(
+                goal="Read a file, title case it, write it to a new file, run pytest in the project, format the output, and check whether it contains a phrase",
+                candidates=candidates,
+            )
+        )
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert len(result.graph.graph.nodes) == 3
+        ids = {node.config["skill_id"] for node in result.graph.graph.nodes if isinstance(node.config, dict)}
+        assert ids == {
+            "synth.file_transform_write_pytest_workflow.v1",
+            "synth.format_region.v1",
+            "text.contains.v1",
+        }
+        edge_addrs = {(edge.from_, edge.to) for edge in result.graph.graph.edges}
+        assert ("workflow.stdout", "followup_1.stdout") in edge_addrs
+        assert ("followup_1.prefixed", "followup_2.text") in edge_addrs
+        assert ("input.substring", "followup_2.substring") in edge_addrs
+        assert result.graph.graph.outputs == {"result": "followup_2.result"}
 
     def test_backend_with_echo_provider(self) -> None:
         """Integration: EchoLLMProvider → IR parse → compile → validate."""

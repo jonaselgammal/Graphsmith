@@ -390,16 +390,16 @@ def _decomp_contract_section(decomp: SemanticDecomposition) -> str:
 
 
 def _compose_structural_synthesized_reuse(request: PlanRequest) -> PlanResult | None:
-    """Build a bounded IR plan from a reused synthesized workflow plus one follow-up step."""
+    """Build a bounded IR plan from a reused synthesized workflow plus follow-up steps."""
     workflow = _find_matching_synth_workflow(request.candidates)
     if workflow is None:
         return None
 
-    secondary = _find_adjacent_secondary(workflow, request.candidates)
-    if secondary is None:
+    followups = _find_structural_followups(workflow, request.candidates)
+    if not followups:
         return None
 
-    ir = _build_structural_reuse_ir(request.goal, workflow, secondary)
+    ir = _build_structural_reuse_ir(request.goal, workflow, followups)
     try:
         glue = compile_ir(ir)
     except CompilerError:
@@ -410,7 +410,7 @@ def _compose_structural_synthesized_reuse(request: PlanRequest) -> PlanResult | 
         graph=glue,
         reasoning=(
             "Deterministically composed a reused synthesized workflow "
-            f"with adjacent step '{secondary.id}@{secondary.version}'."
+            f"with {len(followups)} structural follow-up step(s)."
         ),
         candidates_considered=[f"{c.id}@{c.version}" for c in request.candidates],
         repair_actions=["planner-native synthesized reuse composition"],
@@ -436,17 +436,61 @@ def _find_matching_synth_workflow(candidates: list[IndexEntry]) -> IndexEntry | 
     return None
 
 
-def _find_adjacent_secondary(
+def _find_structural_followups(
     workflow: IndexEntry,
     candidates: list[IndexEntry],
+) -> list[IndexEntry]:
+    current_outputs = set(workflow.output_names)
+    selected: list[IndexEntry] = []
+    remaining = [cand for cand in candidates if cand.id != workflow.id]
+
+    synth_region = _find_matching_followup(
+        remaining,
+        current_outputs=current_outputs,
+        preferred_ids=set(),
+        required_tag="region:format_output",
+    )
+    if synth_region is not None:
+        selected.append(synth_region)
+        current_outputs = set(synth_region.output_names)
+        remaining = [cand for cand in remaining if cand.id != synth_region.id]
+
+    direct_followup = _find_matching_followup(
+        remaining,
+        current_outputs=current_outputs,
+        preferred_ids={"text.prefix_lines.v1", "text.contains.v1", "text.starts_with.v1"},
+        required_tag="",
+    )
+    if direct_followup is not None:
+        selected.append(direct_followup)
+        current_outputs = set(direct_followup.output_names)
+        remaining = [cand for cand in remaining if cand.id != direct_followup.id]
+
+    assertion = _find_matching_followup(
+        remaining,
+        current_outputs=current_outputs,
+        preferred_ids={"text.contains.v1", "text.starts_with.v1"},
+        required_tag="",
+    )
+    if assertion is not None and all(c.id != assertion.id for c in selected):
+        selected.append(assertion)
+
+    return selected
+
+
+def _find_matching_followup(
+    candidates: list[IndexEntry],
+    *,
+    current_outputs: set[str],
+    preferred_ids: set[str],
+    required_tag: str,
 ) -> IndexEntry | None:
-    workflow_outputs = set(workflow.output_names)
     for cand in candidates:
-        if cand.id == workflow.id:
+        if preferred_ids and cand.id not in preferred_ids:
             continue
-        if cand.id == "text.prefix_lines.v1" and "stdout" in workflow_outputs:
-            return cand
-        if cand.id in {"text.contains.v1", "text.starts_with.v1"} and "stdout" in workflow_outputs:
+        if required_tag and required_tag not in set(cand.tags):
+            continue
+        if any(_match_output_to_input(current_outputs, inp_name) is not None for inp_name in cand.input_names):
             return cand
     return None
 
@@ -454,53 +498,74 @@ def _find_adjacent_secondary(
 def _build_structural_reuse_ir(
     goal: str,
     workflow: IndexEntry,
-    secondary: IndexEntry,
+    followups: list[IndexEntry],
 ) -> PlanningIR:
     inputs = [
         IRInput(name="input_path", type="string"),
         IRInput(name="output_path", type="string"),
         IRInput(name="cwd", type="string"),
     ]
-    secondary_sources: dict[str, IRSource] = {}
+    steps = [
+        IRStep(
+            name="workflow",
+            skill_id=workflow.id,
+            version=workflow.version,
+            sources={
+                "input_path": IRSource(step="input", port="input_path"),
+                "output_path": IRSource(step="input", port="output_path"),
+                "cwd": IRSource(step="input", port="cwd"),
+            },
+        )
+    ]
+    current_step = "workflow"
+    current_outputs = set(workflow.output_names)
+    all_effects = set(workflow.effects)
+    seen_inputs = {field.name for field in inputs}
 
-    for inp_name in secondary.input_names:
-        if inp_name == "text":
-            secondary_sources[inp_name] = IRSource(step="workflow", port="stdout")
-        elif inp_name in {"prefix", "substring"}:
-            inputs.append(IRInput(name=inp_name, type="string"))
-            secondary_sources[inp_name] = IRSource(step="input", port=inp_name)
+    for index, followup in enumerate(followups, start=1):
+        sources: dict[str, IRSource] = {}
+        for inp_name in followup.input_names:
+            matched = _match_output_to_input(current_outputs, inp_name)
+            if matched is not None:
+                sources[inp_name] = IRSource(step=current_step, port=matched)
+            else:
+                if inp_name not in seen_inputs:
+                    inputs.append(IRInput(name=inp_name, type="string"))
+                    seen_inputs.add(inp_name)
+                sources[inp_name] = IRSource(step="input", port=inp_name)
 
-    output_name, output_port = _secondary_output_contract(secondary)
+        step_name = f"followup_{index}"
+        steps.append(
+            IRStep(
+                name=step_name,
+                skill_id=followup.id,
+                version=followup.version,
+                sources=sources,
+            )
+        )
+        current_step = step_name
+        current_outputs = set(followup.output_names)
+        all_effects.update(followup.effects)
 
+    final_output_port = sorted(current_outputs)[0]
     return PlanningIR(
         goal=goal,
         inputs=inputs,
-        steps=[
-            IRStep(
-                name="workflow",
-                skill_id=workflow.id,
-                version=workflow.version,
-                sources={
-                    "input_path": IRSource(step="input", port="input_path"),
-                    "output_path": IRSource(step="input", port="output_path"),
-                    "cwd": IRSource(step="input", port="cwd"),
-                },
-            ),
-            IRStep(
-                name="followup",
-                skill_id=secondary.id,
-                version=secondary.version,
-                sources=secondary_sources,
-            ),
-        ],
-        final_outputs={output_name: IROutputRef(step="followup", port=output_port)},
-        effects=sorted(set(workflow.effects) | set(secondary.effects)) or ["pure"],
+        steps=steps,
+        final_outputs={final_output_port: IROutputRef(step=current_step, port=final_output_port)},
+        effects=sorted(all_effects) or ["pure"],
     )
 
 
-def _secondary_output_contract(entry: IndexEntry) -> tuple[str, str]:
-    if entry.id == "text.prefix_lines.v1":
-        return "prefixed", "prefixed"
-    if entry.id in {"text.contains.v1", "text.starts_with.v1"}:
-        return "result", "result"
-    return entry.output_names[0], entry.output_names[0]
+def _match_output_to_input(outputs: set[str], input_name: str) -> str | None:
+    if input_name in outputs:
+        return input_name
+    alias_sources = {
+        "text": ["stdout", "result", "normalized", "summary", "formatted", "prefixed"],
+        "stdout": ["stdout", "formatted", "prefixed"],
+        "lines": ["keywords"],
+    }
+    for source in alias_sources.get(input_name, []):
+        if source in outputs:
+            return source
+    return None

@@ -173,6 +173,52 @@ class TestCandidateRetrieval:
         )
         assert candidates[0].id == "synth.file_transform_write_pytest_workflow.v1"
 
+    def test_prefers_smoke_tested_promoted_candidate(self, reg: LocalRegistry, tmp_path: Path) -> None:
+        base_graph = {
+            "version": 1,
+            "nodes": [{"id": "fmt", "op": "template.render", "config": {"template": "{{text}}"}}],
+            "edges": [{"from": "input.text", "to": "fmt.text"}],
+            "outputs": {"summary": "fmt.rendered"},
+        }
+        plain_dir = write_package(
+            tmp_path / "plain_pkg",
+            skill={
+                "id": "synth.summary_plain.v1",
+                "name": "Summary Plain",
+                "version": "1.0.0",
+                "description": "plain summarized text workflow",
+                "inputs": [{"name": "text", "type": "string", "required": True}],
+                "outputs": [{"name": "summary", "type": "string"}],
+                "effects": ["pure"],
+                "tags": ["synthesized", "subgraph", "closed-loop", "validated", "transform:summarize"],
+            },
+            graph=base_graph,
+            examples=minimal_examples(),
+        )
+        promoted_dir = write_package(
+            tmp_path / "promoted_pkg",
+            skill={
+                "id": "synth.summary_promoted.v1",
+                "name": "Summary Promoted",
+                "version": "1.0.0",
+                "description": "promoted summarized text workflow",
+                "inputs": [{"name": "text", "type": "string", "required": True}],
+                "outputs": [{"name": "summary", "type": "string"}],
+                "effects": ["pure"],
+                "tags": [
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "smoke_tested", "promoted", "transform:summarize",
+                ],
+            },
+            graph=base_graph,
+            examples=minimal_examples(),
+        )
+        reg.publish(plain_dir)
+        reg.publish(promoted_dir)
+
+        candidates = retrieve_candidates("summarize this text", reg, max_candidates=2)
+        assert candidates[0].id == "synth.summary_promoted.v1"
+
 
 # ── mock backend ─────────────────────────────────────────────────────
 

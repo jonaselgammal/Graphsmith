@@ -1,11 +1,12 @@
 {
   "id": "f07",
-  "goal": "Parse this JSON, extract the value field, convert it to uppercase, and check whether it starts with a prefix",
+  "goal": "Read a file, title case it, write it to a new file, run pytest in the project, format the output, and check whether it contains a phrase",
   "tier": 3,
-  "tags": ["json", "text", "multi_generated", "predicate"],
+  "tags": ["coding", "environment", "multi_unit", "generated_assertion"],
   "expected_success": true,
-  "required_skill_ids": ["json.extract_field.v1", "text.uppercase.v1", "text.starts_with.v1"],
-  "required_graph_inputs": ["prefix"],
+  "required_skill_ids": ["text.contains.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "cwd", "substring"],
+  "required_output_names": ["result"],
   "min_node_count": 3,
-  "notes": "Existing JSON extraction plus two generated text capabilities."
+  "notes": "Multi-unit planner-native chain: reused synthesized workflow, synthesized formatting region, then generated assertion."
 }

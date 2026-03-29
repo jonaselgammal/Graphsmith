@@ -1,11 +1,11 @@
 {
   "id": "f08",
-  "goal": "Compute the median of these numbers, divide it by another number, and pretty print the result as JSON",
+  "goal": "Using only trusted published skills, read a file, title case it, write it to a new file, and then run pytest in the project",
   "tier": 3,
-  "tags": ["math", "stats", "json", "generated"],
+  "tags": ["coding", "environment", "trust", "remote"],
   "expected_success": true,
-  "required_skill_ids": ["math.median.v1", "math.divide.v1", "json.pretty_print.v1"],
-  "required_graph_inputs": ["divisor"],
-  "min_node_count": 3,
-  "notes": "Mixed stats-plus-formatting probe with one existing generated math skill and one missing math step."
+  "required_graph_inputs": ["input_path", "output_path", "cwd"],
+  "required_output_names": ["stdout"],
+  "min_node_count": 1,
+  "notes": "Trust-sensitive remote synthesized-workflow reuse should still work when the goal constrains reuse policy."
 }

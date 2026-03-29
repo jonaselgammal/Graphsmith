@@ -1,11 +1,11 @@
 {
   "id": "f11",
-  "goal": "Take these code lines, normalize them, sort them, remove duplicates, and prefix each line with comment markers",
+  "goal": "Read a file, replace one phrase with another, write it back, run pytest, and summarize the test output",
   "tier": 3,
-  "tags": ["programming", "code", "text", "pipeline"],
+  "tags": ["coding", "environment", "multi_region", "llm"],
   "expected_success": true,
-  "required_skill_ids": ["text.normalize.v1", "text.sort_lines.v1", "text.remove_duplicates.v1", "text.prefix_lines.v1"],
-  "required_graph_inputs": ["prefix"],
-  "min_node_count": 4,
-  "notes": "Programming-adjacent deterministic pipeline with code-like text rather than prose."
+  "required_skill_ids": ["fs.read_text.v1", "text.replace.v1", "fs.write_text.v1", "dev.run_pytest.v1", "text.summarize.v1"],
+  "required_graph_inputs": ["path", "old", "new", "cwd"],
+  "min_node_count": 5,
+  "notes": "Multi-region coding workflow mixing file edit, test execution, and LLM summarization."
 }

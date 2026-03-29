@@ -2,15 +2,13 @@
 
 This suite is meant to probe where Graphsmith currently stops generalizing.
 
-The first three cases are carried over from the previous frontier because they
-were the last saturated near-frontier wins. The remaining nine are deliberately
-harder and broader:
+The first three cases are retained as stable near-frontier wins. The remaining
+nine are refreshed around the newer architecture:
 
-- tier 1: the old saturated near-frontier wins
-- tier 2: near-frontier branch and deterministic pipeline cases that should
-  still be possible with current bounded repair
-- tier 3: much harder loop, math/stats, branch-plus-LLM, multi-generated, and
-  programming-adjacent tasks that are expected to expose the real boundary
+- tier 1: stable saturated wins
+- tier 2: synthesized workflow reuse and mixed composition over coding units
+- tier 3: multi-unit coding chains, trust-sensitive reuse, branch/looped coding
+  workflows, and broader mixed structured tasks
 
 Use:
 
@@ -36,8 +34,7 @@ This refresh is intentionally targeted to land around a real boundary for cheap
 models. Every case is marked as an intended success, but several require
 composition patterns that Graphsmith should not yet solve reliably:
 
-- looped generated-skill composition
-- multi-generated chains
-- math/stats plus formatting
-- branch-plus-LLM subplans
-- programming-adjacent and code-ish list pipelines
+- multi-unit reuse of synthesized coding workflows
+- trust-sensitive remote synthesized-skill reuse
+- branch/looped environment workflows with follow-up reasoning
+- coding-task graphs that mix reusable synth units with generated micro-skills

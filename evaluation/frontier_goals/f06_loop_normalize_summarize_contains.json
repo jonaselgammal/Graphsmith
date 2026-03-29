@@ -1,11 +1,12 @@
 {
   "id": "f06",
-  "goal": "For each text, normalize it, summarize it, and check whether the summary contains a phrase",
+  "goal": "Read a file, title case it, write it to a new file, run pytest in the project, and check whether the test output contains a phrase",
   "tier": 3,
-  "tags": ["loop", "text", "llm", "generated"],
+  "tags": ["coding", "environment", "synth_reuse", "generated_assertion"],
   "expected_success": true,
-  "required_skill_ids": ["text.normalize.v1", "text.summarize.v1", "text.contains.v1"],
-  "required_graph_inputs": ["substring"],
-  "min_node_count": 3,
-  "notes": "Looped existing-skill plus generated predicate composition."
+  "required_skill_ids": ["text.contains.v1"],
+  "required_graph_inputs": ["input_path", "output_path", "cwd", "substring"],
+  "required_output_names": ["result"],
+  "min_node_count": 2,
+  "notes": "Reused synthesized coding workflow plus one generated assertion."
 }

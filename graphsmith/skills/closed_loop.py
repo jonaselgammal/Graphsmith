@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -1723,7 +1724,18 @@ def _find_reusable_synthesized_skill(
         matches.append(entry)
     if not matches:
         return None
-    matches.sort(key=lambda entry: (entry.id, entry.version))
+    matches.sort(
+        key=lambda entry: (
+            -_reusable_synthesized_entry_score(
+                entry,
+                goal,
+                required_effects=required_effects,
+                required_tags=required_tags,
+            ),
+            entry.id,
+            entry.version,
+        )
+    )
     return matches[0]
 
 
@@ -1737,11 +1749,14 @@ def _reusable_synthesized_entry_allowed(
     tags = set(entry.tags)
     if not {"synthesized", "subgraph", "closed-loop", "validated"}.issubset(tags):
         return False
+    effectful = bool(required_effects & {"filesystem_read", "filesystem_write", "shell_exec"})
     if entry.source_kind == "remote":
         if not is_trusted_published_entry(entry):
             return False
         # Require explicit provenance for remote synthesized reuse.
         if not entry.remote_ref:
+            return False
+        if effectful and "smoke_tested" not in tags:
             return False
     elif requires_trusted_published_only(goal):
         return False
@@ -1755,6 +1770,37 @@ def _reusable_synthesized_entry_allowed(
             return False
 
     return True
+
+
+def _reusable_synthesized_entry_score(
+    entry: IndexEntry,
+    goal: str,
+    *,
+    required_effects: set[str],
+    required_tags: set[str],
+) -> float:
+    """Prefer better-verified synthesized skills when multiple matches exist."""
+    score = 0.0
+    tags = set(entry.tags)
+    if "smoke_tested" in tags:
+        score += 3.0
+    if "promoted" in tags:
+        score += 2.5
+    if "validated" in tags:
+        score += 1.0
+    if entry.source_kind == "remote" and is_trusted_published_entry(entry):
+        score += min(1.5, max(0.0, entry.trust_score or 0.0))
+    if required_effects and required_effects.issubset(set(entry.effects)):
+        score += 1.0
+    if required_tags and required_tags.issubset(tags):
+        score += 1.0
+
+    goal_tokens = set(re.findall(r"[a-z0-9]+", goal.lower()))
+    for tag in entry.tags:
+        tag_words = set(re.findall(r"[a-z0-9]+", tag.lower()))
+        if goal_tokens & tag_words:
+            score += 0.2
+    return score
 
 
 def _materialize_subgraph_skill(
