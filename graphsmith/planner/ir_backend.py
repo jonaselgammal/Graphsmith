@@ -14,7 +14,7 @@ from graphsmith.planner.decomposition import (
     get_decomp_system_message,
     parse_decomposition,
 )
-from graphsmith.planner.ir import PlanningIR
+from graphsmith.planner.ir import IRInput, IROutputRef, IRSource, IRStep, PlanningIR
 from graphsmith.planner.ir_parser import IRParseError, parse_ir_block_output, parse_ir_output
 from graphsmith.planner.ir_prompt import (
     build_ir_block_repair_context,
@@ -29,6 +29,7 @@ from graphsmith.planner.repair import (
 )
 from graphsmith.planner.ir_scorer import ScoreBreakdown, score_candidate
 from graphsmith.planner.models import GlueGraph, PlanRequest, PlanResult, UnresolvedHole
+from graphsmith.registry.index import IndexEntry
 
 
 class CandidateResult(BaseModel):
@@ -79,6 +80,10 @@ class IRPlannerBackend:
         return self._last_decomposition
 
     def compose(self, request: PlanRequest) -> PlanResult:
+        structural = _compose_structural_synthesized_reuse(request)
+        if structural is not None:
+            return structural
+
         # Get decomposition if enabled
         decomp: SemanticDecomposition | None = None
         if self._use_decomposition:
@@ -382,3 +387,120 @@ def _decomp_contract_section(decomp: SemanticDecomposition) -> str:
         "- final_outputs keys MUST use the names listed above.",
     ]
     return "\n".join(lines)
+
+
+def _compose_structural_synthesized_reuse(request: PlanRequest) -> PlanResult | None:
+    """Build a bounded IR plan from a reused synthesized workflow plus one follow-up step."""
+    workflow = _find_matching_synth_workflow(request.candidates)
+    if workflow is None:
+        return None
+
+    secondary = _find_adjacent_secondary(workflow, request.candidates)
+    if secondary is None:
+        return None
+
+    ir = _build_structural_reuse_ir(request.goal, workflow, secondary)
+    try:
+        glue = compile_ir(ir)
+    except CompilerError:
+        return None
+
+    return PlanResult(
+        status="success",
+        graph=glue,
+        reasoning=(
+            "Deterministically composed a reused synthesized workflow "
+            f"with adjacent step '{secondary.id}@{secondary.version}'."
+        ),
+        candidates_considered=[f"{c.id}@{c.version}" for c in request.candidates],
+        repair_actions=["planner-native synthesized reuse composition"],
+    )
+
+
+def _find_matching_synth_workflow(candidates: list[IndexEntry]) -> IndexEntry | None:
+    required_tags = {
+        "synthesized",
+        "subgraph",
+        "closed-loop",
+        "validated",
+        "workflow:file_transform_write_pytest",
+    }
+    for cand in candidates:
+        tags = set(cand.tags)
+        if not cand.id.startswith("synth."):
+            continue
+        if not required_tags.issubset(tags):
+            continue
+        if {"input_path", "output_path", "cwd"}.issubset(set(cand.input_names)):
+            return cand
+    return None
+
+
+def _find_adjacent_secondary(
+    workflow: IndexEntry,
+    candidates: list[IndexEntry],
+) -> IndexEntry | None:
+    workflow_outputs = set(workflow.output_names)
+    for cand in candidates:
+        if cand.id == workflow.id:
+            continue
+        if cand.id == "text.prefix_lines.v1" and "stdout" in workflow_outputs:
+            return cand
+        if cand.id in {"text.contains.v1", "text.starts_with.v1"} and "stdout" in workflow_outputs:
+            return cand
+    return None
+
+
+def _build_structural_reuse_ir(
+    goal: str,
+    workflow: IndexEntry,
+    secondary: IndexEntry,
+) -> PlanningIR:
+    inputs = [
+        IRInput(name="input_path", type="string"),
+        IRInput(name="output_path", type="string"),
+        IRInput(name="cwd", type="string"),
+    ]
+    secondary_sources: dict[str, IRSource] = {}
+
+    for inp_name in secondary.input_names:
+        if inp_name == "text":
+            secondary_sources[inp_name] = IRSource(step="workflow", port="stdout")
+        elif inp_name in {"prefix", "substring"}:
+            inputs.append(IRInput(name=inp_name, type="string"))
+            secondary_sources[inp_name] = IRSource(step="input", port=inp_name)
+
+    output_name, output_port = _secondary_output_contract(secondary)
+
+    return PlanningIR(
+        goal=goal,
+        inputs=inputs,
+        steps=[
+            IRStep(
+                name="workflow",
+                skill_id=workflow.id,
+                version=workflow.version,
+                sources={
+                    "input_path": IRSource(step="input", port="input_path"),
+                    "output_path": IRSource(step="input", port="output_path"),
+                    "cwd": IRSource(step="input", port="cwd"),
+                },
+            ),
+            IRStep(
+                name="followup",
+                skill_id=secondary.id,
+                version=secondary.version,
+                sources=secondary_sources,
+            ),
+        ],
+        final_outputs={output_name: IROutputRef(step="followup", port=output_port)},
+        effects=sorted(set(workflow.effects) | set(secondary.effects)) or ["pure"],
+    )
+
+
+def _secondary_output_contract(entry: IndexEntry) -> tuple[str, str]:
+    if entry.id == "text.prefix_lines.v1":
+        return "prefixed", "prefixed"
+    if entry.id in {"text.contains.v1", "text.starts_with.v1"}:
+        return "result", "result"
+    return entry.output_names[0], entry.output_names[0]

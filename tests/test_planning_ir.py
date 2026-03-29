@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from graphsmith.registry import LocalRegistry
+from graphsmith.registry.index import IndexEntry
 from graphsmith.planner.compiler import (
     CompilerError,
     CycleError,
@@ -27,6 +30,8 @@ from graphsmith.planner.ir_prompt import build_ir_planning_context, get_ir_syste
 from graphsmith.planner.repair import normalize_ir_contracts, repair_ir_locally
 from graphsmith.planner.models import PlanRequest
 from graphsmith.validator import validate_skill_package
+
+from conftest import minimal_examples, write_package
 
 
 # ── IR model tests ──────────────────────────────────────────────────
@@ -829,6 +834,150 @@ class TestIRPrompt:
 
 
 class TestIRBackend:
+    def test_backend_composes_reused_synthesized_workflow_without_llm(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        workflow_dir = write_package(
+            tmp_path / "workflow_pkg",
+            skill={
+                "id": "synth.file_transform_write_pytest_workflow.v1",
+                "name": "Synth Workflow",
+                "version": "1.0.0",
+                "description": "file workflow",
+                "inputs": [
+                    {"name": "input_path", "type": "string", "required": True},
+                    {"name": "output_path", "type": "string", "required": True},
+                    {"name": "cwd", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "stdout", "type": "string"}],
+                "effects": ["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                "tags": [
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "workflow:file_transform_write_pytest", "coding", "environment",
+                ],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{"id": "emit", "op": "template.render", "config": {"template": "{{cwd}}"}}],
+                "edges": [
+                    {"from": "input.input_path", "to": "emit.input_path"},
+                    {"from": "input.output_path", "to": "emit.output_path"},
+                    {"from": "input.cwd", "to": "emit.cwd"},
+                ],
+                "outputs": {"stdout": "emit.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        prefix_dir = write_package(
+            tmp_path / "prefix_pkg",
+            skill={
+                "id": "text.prefix_lines.v1",
+                "name": "Prefix Lines",
+                "version": "1.0.0",
+                "description": "Prefix each line.",
+                "inputs": [
+                    {"name": "text", "type": "string", "required": True},
+                    {"name": "prefix", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "prefixed", "type": "string"}],
+                "effects": ["pure"],
+                "tags": ["text", "formatting"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{"id": "fmt", "op": "template.render", "config": {"template": "{{text}}"}}],
+                "edges": [
+                    {"from": "input.text", "to": "fmt.text"},
+                    {"from": "input.prefix", "to": "fmt.prefix"},
+                ],
+                "outputs": {"prefixed": "fmt.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        reg = LocalRegistry(root=tmp_path / "registry")
+        reg.publish(workflow_dir)
+        reg.publish(prefix_dir)
+
+        candidates = [
+            entry for entry in reg.list_all()
+            if entry.id in {"synth.file_transform_write_pytest_workflow.v1", "text.prefix_lines.v1"}
+        ]
+
+        class CrashProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                raise AssertionError("provider should not be called for structural synth reuse")
+
+        backend = IRPlannerBackend(CrashProvider())  # type: ignore[arg-type]
+        result = backend.compose(
+            PlanRequest(
+                goal="Read a file, title case it, write it to a new file, run pytest in the project, and prefix each line of the test output",
+                candidates=candidates,
+            )
+        )
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert any("planner-native synthesized reuse composition" in action for action in result.repair_actions)
+        ids = {node.config["skill_id"] for node in result.graph.graph.nodes if isinstance(node.config, dict)}
+        assert ids == {
+            "synth.file_transform_write_pytest_workflow.v1",
+            "text.prefix_lines.v1",
+        }
+        assert result.graph.graph.outputs == {"prefixed": "followup.prefixed"}
+
+    def test_backend_composes_reused_synthesized_workflow_with_generated_assertion_without_llm(
+        self,
+    ) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        candidates = [
+            IndexEntry(
+                id="synth.file_transform_write_pytest_workflow.v1",
+                name="Synth Workflow",
+                version="1.0.0",
+                description="file workflow",
+                tags=[
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "workflow:file_transform_write_pytest", "coding", "environment",
+                ],
+                effects=["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                input_names=["input_path", "output_path", "cwd"],
+                output_names=["stdout"],
+            ),
+            IndexEntry(
+                id="text.contains.v1",
+                name="Contains",
+                version="1.0.0",
+                description="Check whether text contains a phrase.",
+                tags=["text", "contains"],
+                effects=["pure"],
+                input_names=["text", "substring"],
+                output_names=["result"],
+            ),
+        ]
+
+        class CrashProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                raise AssertionError("provider should not be called for structural synth reuse")
+
+        backend = IRPlannerBackend(CrashProvider())  # type: ignore[arg-type]
+        result = backend.compose(
+            PlanRequest(
+                goal="Read a file, title case it, write it to a new file, run pytest in the project, and check whether the test output contains a phrase",
+                candidates=candidates,
+            )
+        )
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert result.graph.graph.outputs == {"result": "followup.result"}
+        edge_addrs = {(edge.from_, edge.to) for edge in result.graph.graph.edges}
+        assert ("workflow.stdout", "followup.text") in edge_addrs
+        assert ("input.substring", "followup.substring") in edge_addrs
+
     def test_backend_with_echo_provider(self) -> None:
         """Integration: EchoLLMProvider → IR parse → compile → validate."""
         from graphsmith.planner.ir_backend import IRPlannerBackend
