@@ -1606,6 +1606,8 @@ def _build_file_transform_write_then_pytest_contains_plan(
 def _build_run_pytest_summarize_report_plan(
     goal: str,
     registry: RegistryBackend,
+    *,
+    output_dir: str | Path | None = None,
 ) -> GlueGraph | None:
     from graphsmith.models.common import IOField
     from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
@@ -1616,7 +1618,84 @@ def _build_run_pytest_summarize_report_plan(
     required = {"dev.run_pytest.v1", "text.summarize.v1", "fs.write_text.v1"}
     if not required.issubset(available):
         return None
-    return GlueGraph(
+
+    reusable_workflow = _find_reusable_synthesized_skill(
+        goal,
+        registry,
+        required_inputs={"cwd", "report_path"},
+        required_outputs={"path"},
+        required_effects={"shell_exec", "filesystem_write", "llm_inference"},
+        required_tags={"workflow:pytest_summarize_report"},
+    )
+    if reusable_workflow is not None:
+        return _build_single_skill_invoke_plan(
+            goal,
+            reusable_workflow.id,
+            [
+                IOField(name="cwd", type="string"),
+                IOField(name="report_path", type="string"),
+            ],
+            [IOField(name="path", type="string")],
+            ["shell_exec", "filesystem_write", "llm_inference"],
+        )
+
+    test_region = GlueGraph(
+        goal=f"{goal} :: pytest region",
+        inputs=[IOField(name="cwd", type="string")],
+        outputs=[IOField(name="stdout", type="string")],
+        effects=["shell_exec"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
+            ],
+            edges=[GraphEdge(from_="input.cwd", to="pytest.cwd")],
+            outputs={"stdout": "pytest.stdout"},
+        ),
+    )
+    _, test_skill_id, _ = _materialize_subgraph_skill(
+        goal,
+        test_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="pytest_region",
+        extra_tags=["coding", "environment", "shell", "pytest", "region:test"],
+    )
+
+    report_region = GlueGraph(
+        goal=f"{goal} :: report region",
+        inputs=[
+            IOField(name="stdout", type="string"),
+            IOField(name="report_path", type="string"),
+        ],
+        outputs=[IOField(name="path", type="string")],
+        effects=["filesystem_write", "llm_inference"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="summarize", op="skill.invoke", config={"skill_id": "text.summarize.v1", "version": "1.0.0"}),
+                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.stdout", to="summarize.text"),
+                GraphEdge(from_="input.report_path", to="write.path"),
+                GraphEdge(from_="summarize.summary", to="write.text"),
+            ],
+            outputs={"path": "write.path"},
+        ),
+    )
+    _, report_skill_id, _ = _materialize_subgraph_skill(
+        goal,
+        report_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="pytest_report_region",
+        extra_tags=["coding", "environment", "reporting", "region:report", "summary"],
+    )
+
+    outer = GlueGraph(
         goal=goal,
         inputs=[
             IOField(name="cwd", type="string"),
@@ -1627,25 +1706,35 @@ def _build_run_pytest_summarize_report_plan(
         graph=GraphBody(
             version=1,
             nodes=[
-                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
-                GraphNode(id="summarize", op="skill.invoke", config={"skill_id": "text.summarize.v1", "version": "1.0.0"}),
-                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
+                GraphNode(id="test_region", op="skill.invoke", config={"skill_id": test_skill_id, "version": "1.0.0"}),
+                GraphNode(id="report_region", op="skill.invoke", config={"skill_id": report_skill_id, "version": "1.0.0"}),
             ],
             edges=[
-                GraphEdge(from_="input.cwd", to="pytest.cwd"),
-                GraphEdge(from_="pytest.stdout", to="summarize.text"),
-                GraphEdge(from_="input.report_path", to="write.path"),
-                GraphEdge(from_="summarize.summary", to="write.text"),
+                GraphEdge(from_="input.cwd", to="test_region.cwd"),
+                GraphEdge(from_="test_region.stdout", to="report_region.stdout"),
+                GraphEdge(from_="input.report_path", to="report_region.report_path"),
             ],
-            outputs={"path": "write.path"},
+            outputs={"path": "report_region.path"},
         ),
     )
+    _workflow_plan, _, _ = _materialize_subgraph_skill(
+        goal,
+        outer,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="pytest_summarize_report_workflow",
+        extra_tags=["coding", "environment", "pytest", "reporting", "workflow", "workflow:pytest_summarize_report"],
+    )
+    return outer
 
 
 def _build_read_replace_write_then_pytest_summarize_plan(
     goal: str,
     registry: RegistryBackend,
     generated_spec: SkillSpec | None = None,
+    *,
+    output_dir: str | Path | None = None,
 ) -> GlueGraph | None:
     from graphsmith.models.common import IOField
     from graphsmith.models.graph import GraphBody, GraphEdge, GraphNode
@@ -1657,7 +1746,126 @@ def _build_read_replace_write_then_pytest_summarize_plan(
     required = {"fs.read_text.v1", "fs.write_text.v1", "dev.run_pytest.v1", "text.summarize.v1", replace_skill_id}
     if not required.issubset(available):
         return None
-    return GlueGraph(
+
+    reusable_workflow = _find_reusable_synthesized_skill(
+        goal,
+        registry,
+        required_inputs={"input_path", "output_path", "old", "new", "cwd"},
+        required_outputs={"summary"},
+        required_effects={"filesystem_read", "filesystem_write", "shell_exec", "llm_inference"},
+        required_tags={"workflow:read_replace_write_pytest_summarize"},
+    )
+    if reusable_workflow is not None:
+        return _build_single_skill_invoke_plan(
+            goal,
+            reusable_workflow.id,
+            [
+                IOField(name="input_path", type="string"),
+                IOField(name="output_path", type="string"),
+                IOField(name="old", type="string"),
+                IOField(name="new", type="string"),
+                IOField(name="cwd", type="string"),
+            ],
+            [IOField(name="summary", type="string")],
+            ["filesystem_read", "filesystem_write", "shell_exec", "llm_inference"],
+        )
+
+    edit_region = GlueGraph(
+        goal=goal,
+        inputs=[
+            IOField(name="input_path", type="string"),
+            IOField(name="output_path", type="string"),
+            IOField(name="old", type="string"),
+            IOField(name="new", type="string"),
+        ],
+        outputs=[IOField(name="path", type="string")],
+        effects=["filesystem_read", "filesystem_write", "pure"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="read", op="skill.invoke", config={"skill_id": "fs.read_text.v1", "version": "1.0.0"}),
+                GraphNode(id="replace", op="skill.invoke", config={"skill_id": replace_skill_id, "version": "1.0.0"}),
+                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.input_path", to="read.path"),
+                GraphEdge(from_="read.text", to="replace.text"),
+                GraphEdge(from_="input.old", to="replace.old"),
+                GraphEdge(from_="input.new", to="replace.new"),
+                GraphEdge(from_="input.output_path", to="write.path"),
+                GraphEdge(from_="replace.replaced", to="write.text"),
+            ],
+            outputs={"path": "write.path"},
+        ),
+    )
+    _, edit_skill_id, _ = _materialize_subgraph_skill(
+        goal,
+        edit_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="replace_file_region",
+        extra_tags=["coding", "environment", "filesystem", "region:file_edit", "transform:replace"],
+    )
+
+    test_region = GlueGraph(
+        goal=f"{goal} :: test region",
+        inputs=[
+            IOField(name="cwd", type="string"),
+            IOField(name="after_path", type="string"),
+        ],
+        outputs=[IOField(name="stdout", type="string")],
+        effects=["shell_exec"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="after_path_token", op="template.render", config={"template": "{{after_path}}"}),
+                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.after_path", to="after_path_token.after_path"),
+                GraphEdge(from_="input.cwd", to="pytest.cwd"),
+            ],
+            outputs={"stdout": "pytest.stdout"},
+        ),
+    )
+    _, test_skill_id, _ = _materialize_subgraph_skill(
+        goal,
+        test_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="replace_test_region",
+        extra_tags=["coding", "environment", "shell", "pytest", "region:test"],
+    )
+
+    report_region = GlueGraph(
+        goal=f"{goal} :: report region",
+        inputs=[IOField(name="stdout", type="string")],
+        outputs=[IOField(name="summary", type="string")],
+        effects=["llm_inference"],
+        graph=GraphBody(
+            version=1,
+            nodes=[
+                GraphNode(id="summarize", op="skill.invoke", config={"skill_id": "text.summarize.v1", "version": "1.0.0"}),
+            ],
+            edges=[
+                GraphEdge(from_="input.stdout", to="summarize.text"),
+            ],
+            outputs={"summary": "summarize.summary"},
+        ),
+    )
+    _, report_skill_id, _ = _materialize_subgraph_skill(
+        goal,
+        report_region,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="pytest_summary_region",
+        extra_tags=["coding", "environment", "reporting", "region:report", "summary"],
+    )
+
+    outer = GlueGraph(
         goal=goal,
         inputs=[
             IOField(name="input_path", type="string"),
@@ -1671,37 +1879,55 @@ def _build_read_replace_write_then_pytest_summarize_plan(
         graph=GraphBody(
             version=1,
             nodes=[
-                GraphNode(id="read", op="skill.invoke", config={"skill_id": "fs.read_text.v1", "version": "1.0.0"}),
-                GraphNode(id="replace", op="skill.invoke", config={"skill_id": replace_skill_id, "version": "1.0.0"}),
-                GraphNode(id="write", op="skill.invoke", config={"skill_id": "fs.write_text.v1", "version": "1.0.0"}),
-                GraphNode(id="pytest", op="skill.invoke", config={"skill_id": "dev.run_pytest.v1", "version": "1.0.0"}),
-                GraphNode(id="summarize", op="skill.invoke", config={"skill_id": "text.summarize.v1", "version": "1.0.0"}),
+                GraphNode(id="edit_region", op="skill.invoke", config={"skill_id": edit_skill_id, "version": "1.0.0"}),
+                GraphNode(id="test_region", op="skill.invoke", config={"skill_id": test_skill_id, "version": "1.0.0"}),
+                GraphNode(id="report_region", op="skill.invoke", config={"skill_id": report_skill_id, "version": "1.0.0"}),
             ],
             edges=[
-                GraphEdge(from_="input.input_path", to="read.path"),
-                GraphEdge(from_="read.text", to="replace.text"),
-                GraphEdge(from_="input.old", to="replace.old"),
-                GraphEdge(from_="input.new", to="replace.new"),
-                GraphEdge(from_="input.output_path", to="write.path"),
-                GraphEdge(from_="replace.replaced", to="write.text"),
-                GraphEdge(from_="input.cwd", to="pytest.cwd"),
-                GraphEdge(from_="pytest.stdout", to="summarize.text"),
+                GraphEdge(from_="input.input_path", to="edit_region.input_path"),
+                GraphEdge(from_="input.output_path", to="edit_region.output_path"),
+                GraphEdge(from_="input.old", to="edit_region.old"),
+                GraphEdge(from_="input.new", to="edit_region.new"),
+                GraphEdge(from_="input.cwd", to="test_region.cwd"),
+                GraphEdge(from_="edit_region.path", to="test_region.after_path"),
+                GraphEdge(from_="test_region.stdout", to="report_region.stdout"),
             ],
-            outputs={"summary": "summarize.summary"},
+            outputs={"summary": "report_region.summary"},
         ),
     )
+    _workflow_plan, _, _ = _materialize_subgraph_skill(
+        goal,
+        outer,
+        registry,
+        output_dir=output_dir,
+        smoke_test=False,
+        slug_hint="replace_write_pytest_summary_workflow",
+        extra_tags=[
+            "coding",
+            "environment",
+            "filesystem",
+            "pytest",
+            "reporting",
+            "workflow",
+            "workflow:read_replace_write_pytest_summarize",
+        ],
+    )
+    return outer
 
 
 def _build_environment_fallback_plan(
     goal: str,
     registry: RegistryBackend,
     generated_spec: SkillSpec | None = None,
+    *,
+    output_dir: str | Path | None = None,
 ) -> GlueGraph | None:
     if generated_spec is not None and _goal_matches_file_transform_write_then_pytest_format_contains(goal):
         plan, _ = _build_file_transform_write_then_pytest_contains_plan(
             goal,
             registry,
             generated_spec=generated_spec,
+            output_dir=output_dir,
         )
         return plan
     if generated_spec is not None and _goal_matches_file_transform_write_then_pytest_contains(goal):
@@ -1709,12 +1935,18 @@ def _build_environment_fallback_plan(
             goal,
             registry,
             generated_spec=generated_spec,
+            output_dir=output_dir,
         )
         return plan
     if generated_spec is not None and _goal_matches_read_replace_write_then_pytest_summarize(goal):
-        return _build_read_replace_write_then_pytest_summarize_plan(goal, registry, generated_spec)
+        return _build_read_replace_write_then_pytest_summarize_plan(
+            goal,
+            registry,
+            generated_spec,
+            output_dir=output_dir,
+        )
     if _goal_matches_run_pytest_summarize_report(goal):
-        return _build_run_pytest_summarize_report_plan(goal, registry)
+        return _build_run_pytest_summarize_report_plan(goal, registry, output_dir=output_dir)
     if _goal_matches_pytest_prefix_branch(goal):
         return _build_run_pytest_prefix_branch_plan(goal, registry)
     if _goal_matches_read_normalize_write(goal):
@@ -2525,7 +2757,7 @@ def run_closed_loop(
             result.success = True
             return result
 
-    environment_fallback = _build_environment_fallback_plan(goal, registry, exact_spec)
+    environment_fallback = _build_environment_fallback_plan(goal, registry, exact_spec, output_dir=output_dir)
     if environment_fallback is not None:
         environment_fallback = _maybe_synthesize_fallback_graph(
             goal,
@@ -2742,7 +2974,7 @@ def run_closed_loop(
             result.success = True
             return result
         if exact_spec is not None:
-            environment_fallback = _build_environment_fallback_plan(goal, registry, exact_spec)
+            environment_fallback = _build_environment_fallback_plan(goal, registry, exact_spec, output_dir=output_dir)
             if environment_fallback is not None:
                 environment_fallback = _maybe_synthesize_fallback_graph(
                     goal,
@@ -2890,7 +3122,7 @@ def run_closed_loop(
                 return result
             result.stopped_reason = "replan_succeeded"
             return result
-        environment_fallback = _build_environment_fallback_plan(goal, registry, spec)
+        environment_fallback = _build_environment_fallback_plan(goal, registry, spec, output_dir=output_dir)
         if environment_fallback is not None:
             environment_fallback = _maybe_synthesize_fallback_graph(
                 goal,

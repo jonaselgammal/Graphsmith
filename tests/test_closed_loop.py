@@ -919,7 +919,7 @@ class TestClosedLoopOrchestration:
         skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
         assert "text.contains.v1" in skill_ids
 
-    def test_environment_fallback_run_pytest_summarize_report_succeeds(self) -> None:
+    def test_environment_fallback_run_pytest_summarize_report_succeeds(self, tmp_path: Path) -> None:
         class FailBackend:
             _candidate_count = 1
             _use_decomposition = False
@@ -942,6 +942,7 @@ class TestClosedLoopOrchestration:
             "Run pytest in this project, summarize the output, and write the summary to a report file",
             FailBackend(),
             reg,
+            output_dir=tmp_path,
             auto_approve=True,
         )
         assert result.success
@@ -950,9 +951,15 @@ class TestClosedLoopOrchestration:
         assert {field.name for field in result.replan_plan.inputs} == {"cwd", "report_path"}
         assert {field.name for field in result.replan_plan.outputs} == {"path"}
         skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
-        assert {"dev.run_pytest.v1", "text.summarize.v1", "fs.write_text.v1"}.issubset(skill_ids)
+        assert len(skill_ids) == 2
+        assert all(skill_id.startswith("synth.") for skill_id in skill_ids)
+        workflow_entries = [
+            entry for entry in reg.list_all()
+            if "workflow:pytest_summarize_report" in entry.tags
+        ]
+        assert len(workflow_entries) == 1
 
-    def test_environment_fallback_read_replace_write_then_pytest_summarize_generates_replace(self) -> None:
+    def test_environment_fallback_read_replace_write_then_pytest_summarize_generates_replace(self, tmp_path: Path) -> None:
         class FailBackend:
             _candidate_count = 1
             _use_decomposition = False
@@ -976,6 +983,7 @@ class TestClosedLoopOrchestration:
             "run pytest in the project, and summarize the test output",
             FailBackend(),
             reg,
+            output_dir=tmp_path,
             auto_approve=True,
         )
         assert result.success
@@ -988,13 +996,13 @@ class TestClosedLoopOrchestration:
         }
         assert {field.name for field in result.replan_plan.outputs} == {"summary"}
         skill_ids = {node.config["skill_id"] for node in result.replan_plan.graph.nodes if node.op == "skill.invoke"}
-        assert {
-            "fs.read_text.v1",
-            "text.replace.v1",
-            "fs.write_text.v1",
-            "dev.run_pytest.v1",
-            "text.summarize.v1",
-        }.issubset(skill_ids)
+        assert len(skill_ids) == 3
+        assert all(skill_id.startswith("synth.") for skill_id in skill_ids)
+        workflow_entries = [
+            entry for entry in reg.list_all()
+            if "workflow:read_replace_write_pytest_summarize" in entry.tags
+        ]
+        assert len(workflow_entries) == 1
 
     def test_exact_skill_grounding_rejects_near_miss_success_and_falls_back(self) -> None:
         class NearMissBackend:
