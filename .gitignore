@@ -34,6 +34,7 @@ Thumbs.db
 
 # Graphsmith local state (never commit these)
 .graphsmith/
+.tmp_*/
 evaluation/results*.json
 data/
 docs/SPRINT_*
