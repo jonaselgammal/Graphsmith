@@ -131,6 +131,48 @@ class TestCandidateRetrieval:
         )
         assert [c.id for c in candidates] == ["text.contains.v1"]
 
+    def test_prefers_structurally_matching_synthesized_workflow(self, reg: LocalRegistry, tmp_path: Path) -> None:
+        reg.publish(EXAMPLE_DIR / "text.prefix_lines.v1")
+        workflow_dir = write_package(
+            tmp_path / "workflow_pkg",
+            skill={
+                "id": "synth.file_transform_write_pytest_workflow.v1",
+                "name": "Synth Workflow",
+                "version": "1.0.0",
+                "description": "read write pytest workflow",
+                "inputs": [
+                    {"name": "input_path", "type": "string", "required": True},
+                    {"name": "output_path", "type": "string", "required": True},
+                    {"name": "cwd", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "stdout", "type": "string"}],
+                "effects": ["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                "tags": [
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "coding", "environment", "workflow:file_transform_write_pytest", "transform:title_case",
+                ],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{"id": "emit", "op": "template.render", "config": {"template": "{{cwd}}"}}],
+                "edges": [
+                    {"from": "input.input_path", "to": "emit.input_path"},
+                    {"from": "input.output_path", "to": "emit.output_path"},
+                    {"from": "input.cwd", "to": "emit.cwd"},
+                ],
+                "outputs": {"stdout": "emit.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(workflow_dir)
+
+        candidates = retrieve_candidates(
+            "Read a file, title case it, write it to a new file, run pytest in the project, and prefix each line of the test output",
+            reg,
+            max_candidates=3,
+        )
+        assert candidates[0].id == "synth.file_transform_write_pytest_workflow.v1"
+
 
 # ── mock backend ─────────────────────────────────────────────────────
 
@@ -193,6 +235,83 @@ class TestMockBackend:
         assert len(result.holes) == 1
         assert result.holes[0].kind == "missing_output_path"
         assert "extra" in result.holes[0].description
+
+    def test_composes_reused_workflow_with_adjacent_formatter(self, reg: LocalRegistry, tmp_path: Path) -> None:
+        workflow_dir = write_package(
+            tmp_path / "workflow_pkg",
+            skill={
+                "id": "synth.file_transform_write_pytest_workflow.v1",
+                "name": "Synth Workflow",
+                "version": "1.0.0",
+                "description": "read write pytest workflow",
+                "inputs": [
+                    {"name": "input_path", "type": "string", "required": True},
+                    {"name": "output_path", "type": "string", "required": True},
+                    {"name": "cwd", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "stdout", "type": "string"}],
+                "effects": ["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                "tags": [
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "coding", "environment", "workflow:file_transform_write_pytest", "transform:title_case",
+                ],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{"id": "emit", "op": "template.render", "config": {"template": "{{cwd}}"}}],
+                "edges": [
+                    {"from": "input.input_path", "to": "emit.input_path"},
+                    {"from": "input.output_path", "to": "emit.output_path"},
+                    {"from": "input.cwd", "to": "emit.cwd"},
+                ],
+                "outputs": {"stdout": "emit.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        prefix_dir = write_package(
+            tmp_path / "prefix_pkg",
+            skill={
+                "id": "text.prefix_lines.v1",
+                "name": "Prefix Lines",
+                "version": "1.0.0",
+                "description": "Prefix each line.",
+                "inputs": [
+                    {"name": "text", "type": "string", "required": True},
+                    {"name": "prefix", "type": "string", "required": True},
+                ],
+                "outputs": [{"name": "prefixed", "type": "string"}],
+                "effects": ["pure"],
+                "tags": ["text", "formatting"],
+            },
+            graph={
+                "version": 1,
+                "nodes": [{"id": "fmt", "op": "template.render", "config": {"template": "{{text}}"}}],
+                "edges": [
+                    {"from": "input.text", "to": "fmt.text"},
+                    {"from": "input.prefix", "to": "fmt.prefix"},
+                ],
+                "outputs": {"prefixed": "fmt.rendered"},
+            },
+            examples=minimal_examples(),
+        )
+        reg.publish(workflow_dir)
+        reg.publish(prefix_dir)
+
+        request = PlanRequest(
+            goal="Read a file, title case it, write it to a new file, run pytest in the project, and prefix each line of the test output",
+            candidates=retrieve_candidates(
+                "Read a file, title case it, write it to a new file, run pytest in the project, and prefix each line of the test output",
+                reg,
+            ),
+        )
+        result = MockPlannerBackend().compose(request)
+        assert result.status == "success"
+        assert result.graph is not None
+        assert len(result.graph.graph.nodes) == 2
+        ids = {node.config["skill_id"] for node in result.graph.graph.nodes if isinstance(node.config, dict)}
+        assert "synth.file_transform_write_pytest_workflow.v1" in ids
+        assert "text.prefix_lines.v1" in ids
+        assert result.graph.graph.outputs == {"prefixed": "text_prefix_lines_v1.prefixed"}
 
 
 # ── prompt builder ───────────────────────────────────────────────────

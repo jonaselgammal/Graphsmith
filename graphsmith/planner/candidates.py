@@ -245,7 +245,27 @@ def _relevance_score(
             score += 2
         elif t in all_stems:
             score += 1
+    score += _structural_synth_bonus(entry, token_set=set(tokens))
     return score
+
+
+def _structural_synth_bonus(entry: IndexEntry, *, token_set: set[str]) -> int:
+    """Small bonus for synthesized skills whose tags match a larger subproblem."""
+    if not entry.id.startswith("synth."):
+        return 0
+    tags = set(entry.tags)
+    bonus = 0
+    if (
+        "workflow:file_transform_write_pytest" in tags
+        and {"read", "file", "write", "pytest"} <= token_set
+    ):
+        bonus += 6
+    if (
+        "region:format_output" in tags
+        and ("prefix" in token_set or "format" in token_set)
+    ):
+        bonus += 4
+    return bonus
 
 
 # ── tokenisation ─────────────────────────────────────────────────────
