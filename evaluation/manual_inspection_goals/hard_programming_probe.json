@@ -1,0 +1,28 @@
+{
+  "id": "manual_hard_programming_probe",
+  "goal": "For each file path in a list, read the file and check whether it contains a target phrase. If any file matches, write a pretty JSON report to disk describing which files matched and whether each one matched; otherwise run pytest in the project, summarize the output, and prefix each line of the summary with a status label. Return the final artifact or report path.",
+  "tier": 5,
+  "tags": [
+    "manual_inspection",
+    "coding",
+    "environment",
+    "loop",
+    "branch",
+    "json",
+    "reporting",
+    "llm"
+  ],
+  "notes": [
+    "This is intentionally beyond the current clean frontier.",
+    "It mixes looped file processing, generated predicates, branching, report generation, and environment effects.",
+    "Use it to inspect whether Graphsmith decomposes into sensible regions and where it starts collapsing."
+  ],
+  "suggested_inputs": {
+    "paths": ["/tmp/a.py", "/tmp/b.py", "/tmp/c.py"],
+    "substring": "deprecated_function(",
+    "cwd": "/path/to/project",
+    "report_path": "/tmp/graphsmith-hard-report.json",
+    "positive_prefix": "PASS: ",
+    "negative_prefix": "FAIL: "
+  }
+}

@@ -10,6 +10,7 @@ from graphsmith.planner.render import render_plan_mermaid, render_plan_text
 
 PLANS_DIR = Path(__file__).resolve().parent.parent / "examples" / "plans"
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+MANUAL_GOALS_DIR = Path(__file__).resolve().parent.parent / "evaluation" / "manual_inspection_goals"
 
 
 class TestUIFiles:
@@ -32,6 +33,20 @@ class TestUIFiles:
         content = (UI_DIR / "index.html").read_text()
         assert "dragover" in content
         assert "drop" in content
+
+    def test_index_html_has_inspector_controls(self) -> None:
+        content = (UI_DIR / "index.html").read_text()
+        assert "Zoom In" in content
+        assert "Zoom Out" in content
+        assert "Hide Edge Labels" in content
+
+
+class TestManualInspectionGoals:
+    def test_manual_goal_exists(self) -> None:
+        assert (MANUAL_GOALS_DIR / "hard_programming_probe.json").exists()
+
+    def test_manual_goal_readme_exists(self) -> None:
+        assert (MANUAL_GOALS_DIR / "README.md").exists()
 
 
 class TestPlanLoadingForUI:

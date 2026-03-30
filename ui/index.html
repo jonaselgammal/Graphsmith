@@ -18,6 +18,10 @@
   #load-section button, #load-section label { display: inline-block; padding: 6px 12px; background: #0066cc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; margin-right: 6px; }
   #load-section button:hover, #load-section label:hover { background: #0055aa; }
   #load-section input[type=file] { display: none; }
+  #canvas-toolbar { padding: 10px 16px; border-bottom: 1px solid #eee; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #canvas-toolbar button { padding: 5px 10px; background: #f0f4f8; border: 1px solid #ccd6e0; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #canvas-toolbar button:hover { background: #e3edf7; }
+  #canvas-toolbar .meta { font-size: 11px; color: #666; margin-left: auto; }
   #detail-panel { flex: 1; overflow-y: auto; padding: 16px; font-size: 13px; }
   #detail-panel h3 { margin-bottom: 8px; font-size: 14px; color: #333; }
   .detail-section { margin-bottom: 16px; }
@@ -31,17 +35,28 @@
 
   /* Canvas */
   #canvas { flex: 1; position: relative; overflow: auto; background: #fafafa; }
-  #canvas svg { width: 100%; min-height: 100%; display: block; }
+  #canvas svg { min-height: 100%; display: block; }
   .node-group { cursor: pointer; }
   .node-rect { rx: 6; ry: 6; stroke-width: 2; }
   .node-rect.input-node { fill: #e8f4f8; stroke: #0066cc; }
   .node-rect.output-node { fill: #e8f8e8; stroke: #28a745; }
   .node-rect.skill-node { fill: #fff; stroke: #666; }
+  .node-rect.synth-node { fill: #fff8e6; stroke: #b7791f; }
+  .node-rect.control-node { fill: #f4ecff; stroke: #6b46c1; }
   .node-rect.skill-node.selected { stroke: #0066cc; stroke-width: 3; }
+  .node-rect.synth-node.selected, .node-rect.control-node.selected { stroke: #0066cc; stroke-width: 3; }
   .node-label { font-size: 12px; fill: #1a1a1a; text-anchor: middle; font-weight: 600; }
   .node-sublabel { font-size: 10px; fill: #666; text-anchor: middle; }
   .edge-line { stroke: #999; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
   .edge-label { font-size: 10px; fill: #666; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 11px; color: #666; }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; border: 1px solid #999; display: inline-block; }
+  .legend-input { background: #e8f4f8; border-color: #0066cc; }
+  .legend-skill { background: #fff; border-color: #666; }
+  .legend-synth { background: #fff8e6; border-color: #b7791f; }
+  .legend-control { background: #f4ecff; border-color: #6b46c1; }
+  .legend-output { background: #e8f8e8; border-color: #28a745; }
 
   /* Drop zone */
   #drop-zone { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,102,204,0.05); border: 3px dashed #0066cc; border-radius: 12px; margin: 40px; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
@@ -61,6 +76,13 @@
     <label for="file-input">Open Plan JSON</label>
     <input type="file" id="file-input" accept=".json">
     <button id="export-mermaid-btn" style="display:none;">Export Mermaid</button>
+  </div>
+  <div id="canvas-toolbar">
+    <button id="zoom-out-btn" type="button">Zoom Out</button>
+    <button id="zoom-reset-btn" type="button">Reset</button>
+    <button id="zoom-in-btn" type="button">Zoom In</button>
+    <button id="toggle-edges-btn" type="button">Hide Edge Labels</button>
+    <span class="meta" id="graph-meta">No plan loaded</span>
   </div>
   <div id="detail-panel">
     <div id="plan-info" style="display:none;"></div>
@@ -96,9 +118,16 @@ const nodeDetail = document.getElementById('node-detail');
 const exportBtn = document.getElementById('export-mermaid-btn');
 const mermaidOutput = document.getElementById('mermaid-output');
 const mermaidCode = document.getElementById('mermaid-code');
+const zoomOutBtn = document.getElementById('zoom-out-btn');
+const zoomResetBtn = document.getElementById('zoom-reset-btn');
+const zoomInBtn = document.getElementById('zoom-in-btn');
+const toggleEdgesBtn = document.getElementById('toggle-edges-btn');
+const graphMeta = document.getElementById('graph-meta');
 
 let currentPlan = null;
 let selectedNodeId = null;
+let currentZoom = 1;
+let showEdgeLabels = true;
 
 // File loading
 fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
@@ -151,6 +180,13 @@ function showPlanInfo(plan) {
     <div class="detail-section">
       <h4>Effects</h4>
       <div>${(plan.effects||['pure']).map(e => `<span class="tag">${e}</span>`).join(' ')}</div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch legend-input"></span>Inputs</span>
+      <span class="legend-item"><span class="legend-swatch legend-skill"></span>Skill</span>
+      <span class="legend-item"><span class="legend-swatch legend-synth"></span>Synthesized</span>
+      <span class="legend-item"><span class="legend-swatch legend-control"></span>Control</span>
+      <span class="legend-item"><span class="legend-swatch legend-output"></span>Outputs</span>
     </div>
     <div class="detail-section">
       <h4>Graph Outputs</h4>
@@ -223,9 +259,11 @@ function renderGraph(plan) {
   }
 
   // Position calculation
-  const nodeW = 160, nodeH = 50, levelGap = 100, nodeGap = 30;
+  const nodeW = 220, nodeH = 58, levelGap = 110, nodeGap = 40;
   const totalLevels = levels.length + 2; // +input, +output
-  const svgW = canvas.clientWidth;
+  const maxLevelSize = Math.max(1, ...levels.map(level => level.length), 1);
+  const contentW = Math.max(canvas.clientWidth, maxLevelSize * (nodeW + nodeGap) + 240);
+  const svgW = contentW;
   const svgH = canvas.clientHeight;
   const startY = 60;
 
@@ -249,11 +287,14 @@ function renderGraph(plan) {
   const outputY = startY + (levels.length + 1) * (nodeH + levelGap);
   positions[outputId] = { x: svgW/2, y: outputY, w: nodeW, h: 40 };
   const contentH = Math.max(svgH, outputY + 120);
-  svg.setAttribute('height', contentH);
+  svg.setAttribute('width', Math.round(svgW * currentZoom));
+  svg.setAttribute('height', Math.round(contentH * currentZoom));
   svg.setAttribute('viewBox', `0 0 ${svgW} ${contentH}`);
+  graphMeta.textContent = `${nodes.length} nodes · ${edges.length} edges · zoom ${Math.round(currentZoom * 100)}%`;
 
   // Clear and render
-  svg.innerHTML = `<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#999"/></marker></defs>`;
+  svg.innerHTML = `<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#999"/></marker></defs><g id="graph-root"></g>`;
+  const graphRoot = document.getElementById('graph-root');
 
   // Edges
   edges.forEach(e => {
@@ -274,15 +315,17 @@ function renderGraph(plan) {
     const midY = (y1 + y2) / 2;
     path.setAttribute('d', `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`);
     path.setAttribute('class', 'edge-line');
-    svg.appendChild(path);
+    graphRoot.appendChild(path);
 
     // Edge label
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', (x1+x2)/2 + 8);
-    label.setAttribute('y', midY - 4);
-    label.setAttribute('class', 'edge-label');
-    label.textContent = srcPort;
-    svg.appendChild(label);
+    if (showEdgeLabels) {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', (x1+x2)/2 + 8);
+      label.setAttribute('y', midY - 4);
+      label.setAttribute('class', 'edge-label');
+      label.textContent = srcPort;
+      graphRoot.appendChild(label);
+    }
   });
 
   // Output edges
@@ -295,13 +338,15 @@ function renderGraph(plan) {
     const midY = (y1 + y2) / 2;
     path.setAttribute('d', `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`);
     path.setAttribute('class', 'edge-line');
-    svg.appendChild(path);
-    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    label.setAttribute('x', (x1+x2)/2 + 8);
-    label.setAttribute('y', midY - 4);
-    label.setAttribute('class', 'edge-label');
-    label.textContent = name;
-    svg.appendChild(label);
+    graphRoot.appendChild(path);
+    if (showEdgeLabels) {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', (x1+x2)/2 + 8);
+      label.setAttribute('y', midY - 4);
+      label.setAttribute('class', 'edge-label');
+      label.textContent = name;
+      graphRoot.appendChild(label);
+    }
   });
 
   // Input node
@@ -310,14 +355,19 @@ function renderGraph(plan) {
   // Skill nodes
   nodes.forEach(n => {
     const skill = (n.config||{}).skill_id || n.op;
-    drawNode(n.id, n.id, skill, 'skill-node', positions[n.id], () => showNodeDetail(n));
+    let nodeClass = 'skill-node';
+    if (skill.startsWith('synth.')) nodeClass = 'synth-node';
+    if (['parallel.map', 'fallback.try', 'branch.if', 'template.render', 'text.equals', 'json.pack'].includes(n.op)) {
+      nodeClass = 'control-node';
+    }
+    drawNode(n.id, n.id, skill, nodeClass, positions[n.id], () => showNodeDetail(n), graphRoot);
   });
 
   // Output node
-  drawNode(outputId, 'Outputs', (plan.outputs||[]).map(o=>o.name).join(', '), 'output-node', positions[outputId]);
+  drawNode(outputId, 'Outputs', (plan.outputs||[]).map(o=>o.name).join(', '), 'output-node', positions[outputId], null, graphRoot);
 }
 
-function drawNode(id, label, sublabel, cls, pos, onClick) {
+function drawNode(id, label, sublabel, cls, pos, onClick, root = svg) {
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   g.setAttribute('class', 'node-group');
   g.setAttribute('data-id', id);
@@ -341,11 +391,11 @@ function drawNode(id, label, sublabel, cls, pos, onClick) {
   sub.setAttribute('x', pos.x);
   sub.setAttribute('y', pos.y + 12);
   sub.setAttribute('class', 'node-sublabel');
-  sub.textContent = sublabel.length > 22 ? sublabel.slice(0,20)+'…' : sublabel;
+  sub.textContent = sublabel.length > 30 ? sublabel.slice(0,28)+'…' : sublabel;
   g.appendChild(sub);
 
   if (onClick) g.addEventListener('click', onClick);
-  svg.appendChild(g);
+  root.appendChild(g);
 }
 
 function highlightNode(id) {
@@ -386,6 +436,24 @@ exportBtn.addEventListener('click', () => {
 function copyMermaid() {
   navigator.clipboard.writeText(mermaidCode.textContent);
 }
+
+zoomInBtn.addEventListener('click', () => {
+  currentZoom = Math.min(2.5, currentZoom + 0.15);
+  if (currentPlan) renderGraph(currentPlan);
+});
+zoomOutBtn.addEventListener('click', () => {
+  currentZoom = Math.max(0.5, currentZoom - 0.15);
+  if (currentPlan) renderGraph(currentPlan);
+});
+zoomResetBtn.addEventListener('click', () => {
+  currentZoom = 1;
+  if (currentPlan) renderGraph(currentPlan);
+});
+toggleEdgesBtn.addEventListener('click', () => {
+  showEdgeLabels = !showEdgeLabels;
+  toggleEdgesBtn.textContent = showEdgeLabels ? 'Hide Edge Labels' : 'Show Edge Labels';
+  if (currentPlan) renderGraph(currentPlan);
+});
 
 // Handle canvas click to deselect
 svg.addEventListener('click', e => {
