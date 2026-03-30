@@ -1047,6 +1047,126 @@ class TestIRBackend:
         assert ("input.substring", "followup_2.substring") in edge_addrs
         assert result.graph.graph.outputs == {"result": "followup_2.result"}
 
+    def test_backend_prefers_goal_matching_synthesized_workflow_by_contract(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        candidates = [
+            IndexEntry(
+                id="synth.file_transform_write_pytest_workflow.v1",
+                name="File Transform Workflow",
+                version="1.0.0",
+                description="file workflow",
+                tags=[
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "workflow:file_transform_write_pytest", "coding", "environment", "smoke_tested",
+                ],
+                effects=["filesystem_read", "filesystem_write", "shell_exec", "pure"],
+                input_names=["input_path", "output_path", "cwd"],
+                required_input_names=["input_path", "output_path", "cwd"],
+                output_names=["stdout"],
+            ),
+            IndexEntry(
+                id="synth.read_replace_write_pytest_summarize_workflow.v1",
+                name="Replace Test Summarize Workflow",
+                version="1.0.0",
+                description="replace, test, summarize workflow",
+                tags=[
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "workflow:read_replace_write_pytest_summarize", "coding", "environment", "smoke_tested",
+                ],
+                effects=["filesystem_read", "filesystem_write", "shell_exec", "llm_inference"],
+                input_names=["input_path", "output_path", "old", "new", "cwd"],
+                required_input_names=["input_path", "output_path", "old", "new", "cwd"],
+                output_names=["summary"],
+            ),
+            IndexEntry(
+                id="text.contains.v1",
+                name="Contains",
+                version="1.0.0",
+                description="Check whether text contains a phrase.",
+                tags=["text", "contains"],
+                effects=["pure"],
+                input_names=["text", "substring"],
+                required_input_names=["text", "substring"],
+                output_names=["result"],
+            ),
+        ]
+
+        class CrashProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                raise AssertionError("provider should not be called for structural synth reuse")
+
+        backend = IRPlannerBackend(CrashProvider())  # type: ignore[arg-type]
+        result = backend.compose(
+            PlanRequest(
+                goal="Read a file, replace one phrase with another, write it back, run pytest, summarize the test output, and check whether the summary contains a phrase",
+                candidates=candidates,
+            )
+        )
+
+        assert result.status == "success"
+        assert result.graph is not None
+        ids = {node.config["skill_id"] for node in result.graph.graph.nodes if isinstance(node.config, dict)}
+        assert "synth.read_replace_write_pytest_summarize_workflow.v1" in ids
+        assert "synth.file_transform_write_pytest_workflow.v1" not in ids
+        assert "text.contains.v1" in ids
+        assert {field.name for field in result.graph.inputs} == {
+            "input_path", "output_path", "old", "new", "cwd", "substring",
+        }
+        edge_addrs = {(edge.from_, edge.to) for edge in result.graph.graph.edges}
+        assert ("workflow.summary", "followup_1.text") in edge_addrs
+        assert ("input.substring", "followup_1.substring") in edge_addrs
+
+    def test_backend_composes_summary_workflow_with_generated_assertion_without_llm(self) -> None:
+        from graphsmith.planner.ir_backend import IRPlannerBackend
+
+        candidates = [
+            IndexEntry(
+                id="synth.read_replace_write_pytest_summarize_workflow.v1",
+                name="Replace Test Summarize Workflow",
+                version="1.0.0",
+                description="replace, test, summarize workflow",
+                tags=[
+                    "synthesized", "subgraph", "closed-loop", "validated",
+                    "workflow:read_replace_write_pytest_summarize", "coding", "environment", "smoke_tested",
+                ],
+                effects=["filesystem_read", "filesystem_write", "shell_exec", "llm_inference"],
+                input_names=["input_path", "output_path", "old", "new", "cwd"],
+                required_input_names=["input_path", "output_path", "old", "new", "cwd"],
+                output_names=["summary"],
+            ),
+            IndexEntry(
+                id="text.contains.v1",
+                name="Contains",
+                version="1.0.0",
+                description="Check whether text contains a phrase.",
+                tags=["text", "contains"],
+                effects=["pure"],
+                input_names=["text", "substring"],
+                required_input_names=["text", "substring"],
+                output_names=["result"],
+            ),
+        ]
+
+        class CrashProvider:
+            def generate(self, prompt: str, **kwargs: object) -> str:
+                raise AssertionError("provider should not be called for structural synth reuse")
+
+        backend = IRPlannerBackend(CrashProvider())  # type: ignore[arg-type]
+        result = backend.compose(
+            PlanRequest(
+                goal="Read a file, replace one phrase with another, write it back, run pytest, summarize the test output, and check whether the summary contains a phrase",
+                candidates=candidates,
+            )
+        )
+
+        assert result.status == "success"
+        assert result.graph is not None
+        assert result.graph.graph.outputs == {"result": "followup_1.result"}
+        edge_addrs = {(edge.from_, edge.to) for edge in result.graph.graph.edges}
+        assert ("workflow.summary", "followup_1.text") in edge_addrs
+        assert ("input.substring", "followup_1.substring") in edge_addrs
+
     def test_backend_with_echo_provider(self) -> None:
         """Integration: EchoLLMProvider → IR parse → compile → validate."""
         from graphsmith.planner.ir_backend import IRPlannerBackend

@@ -1,6 +1,8 @@
 """IR-based planner backend — LLM emits IR, compiler lowers to graph."""
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field
 
 from graphsmith.exceptions import ProviderError
@@ -391,11 +393,11 @@ def _decomp_contract_section(decomp: SemanticDecomposition) -> str:
 
 def _compose_structural_synthesized_reuse(request: PlanRequest) -> PlanResult | None:
     """Build a bounded IR plan from a reused synthesized workflow plus follow-up steps."""
-    workflow = _find_matching_synth_workflow(request.candidates)
+    workflow = _find_matching_synth_workflow(request.goal, request.candidates)
     if workflow is None:
         return None
 
-    followups = _find_structural_followups(workflow, request.candidates)
+    followups = _find_structural_followups(request.goal, workflow, request.candidates)
     if not followups:
         return None
 
@@ -417,26 +419,41 @@ def _compose_structural_synthesized_reuse(request: PlanRequest) -> PlanResult | 
     )
 
 
-def _find_matching_synth_workflow(candidates: list[IndexEntry]) -> IndexEntry | None:
+def _find_matching_synth_workflow(goal: str, candidates: list[IndexEntry]) -> IndexEntry | None:
     required_tags = {
         "synthesized",
         "subgraph",
         "closed-loop",
         "validated",
-        "workflow:file_transform_write_pytest",
     }
+    matches: list[IndexEntry] = []
     for cand in candidates:
         tags = set(cand.tags)
         if not cand.id.startswith("synth."):
             continue
         if not required_tags.issubset(tags):
             continue
-        if {"input_path", "output_path", "cwd"}.issubset(set(cand.input_names)):
-            return cand
-    return None
+        workflow_tags = {tag for tag in tags if tag.startswith("workflow:")}
+        if not workflow_tags:
+            continue
+        matches.append(cand)
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda cand: (
+            -_workflow_goal_match_score(goal, cand),
+            cand.id,
+            cand.version,
+        )
+    )
+    best = matches[0]
+    if _workflow_goal_match_score(goal, best) <= 0:
+        return None
+    return best
 
 
 def _find_structural_followups(
+    goal: str,
     workflow: IndexEntry,
     candidates: list[IndexEntry],
 ) -> list[IndexEntry]:
@@ -445,6 +462,7 @@ def _find_structural_followups(
     remaining = [cand for cand in candidates if cand.id != workflow.id]
 
     synth_region = _find_matching_followup(
+        goal,
         remaining,
         current_outputs=current_outputs,
         preferred_ids=set(),
@@ -456,6 +474,7 @@ def _find_structural_followups(
         remaining = [cand for cand in remaining if cand.id != synth_region.id]
 
     direct_followup = _find_matching_followup(
+        goal,
         remaining,
         current_outputs=current_outputs,
         preferred_ids={"text.prefix_lines.v1", "text.contains.v1", "text.starts_with.v1"},
@@ -467,6 +486,7 @@ def _find_structural_followups(
         remaining = [cand for cand in remaining if cand.id != direct_followup.id]
 
     assertion = _find_matching_followup(
+        goal,
         remaining,
         current_outputs=current_outputs,
         preferred_ids={"text.contains.v1", "text.starts_with.v1"},
@@ -479,20 +499,96 @@ def _find_structural_followups(
 
 
 def _find_matching_followup(
+    goal: str,
     candidates: list[IndexEntry],
     *,
     current_outputs: set[str],
     preferred_ids: set[str],
     required_tag: str,
 ) -> IndexEntry | None:
+    matches: list[IndexEntry] = []
     for cand in candidates:
         if preferred_ids and cand.id not in preferred_ids:
             continue
         if required_tag and required_tag not in set(cand.tags):
             continue
         if any(_match_output_to_input(current_outputs, inp_name) is not None for inp_name in cand.input_names):
-            return cand
-    return None
+            matches.append(cand)
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda cand: (
+            -_followup_goal_match_score(goal, cand),
+            cand.id,
+            cand.version,
+        )
+    )
+    best = matches[0]
+    if _followup_goal_match_score(goal, best) <= 0 and preferred_ids:
+        return None
+    return best
+
+
+def _workflow_goal_match_score(goal: str, workflow: IndexEntry) -> int:
+    goal_lower = goal.lower()
+    tags = set(workflow.tags)
+    score = 0
+    if "workflow:file_transform_write_pytest" in tags:
+        if "pytest" in goal_lower:
+            score += 2
+        if {"input_path", "output_path", "cwd"}.issubset(set(workflow.input_names)):
+            score += 1
+        if any(word in goal_lower for word in ("title case", "normalize", "write", "file")):
+            score += 1
+    if "workflow:pytest_summarize_report" in tags:
+        if "pytest" in goal_lower and ("summarize" in goal_lower or "summary" in goal_lower):
+            score += 3
+        if "report" in goal_lower:
+            score += 2
+        if "report_path" in workflow.input_names:
+            score += 1
+    if "workflow:read_replace_write_pytest_summarize" in tags:
+        if "replace" in goal_lower:
+            score += 3
+        if "pytest" in goal_lower:
+            score += 2
+        if "summarize" in goal_lower or "summary" in goal_lower:
+            score += 2
+        if {"old", "new"}.issubset(set(workflow.input_names)):
+            score += 1
+    output_names = set(workflow.output_names)
+    if "summary" in output_names and ("summarize" in goal_lower or "summary" in goal_lower):
+        score += 1
+    if "stdout" in output_names and "output" in goal_lower:
+        score += 1
+    if "path" in output_names and "report" in goal_lower:
+        score += 1
+    return score
+
+
+def _followup_goal_match_score(goal: str, followup: IndexEntry) -> int:
+    goal_lower = goal.lower()
+    skill_id = followup.id
+    tags = set(followup.tags)
+    score = 0
+    if skill_id == "text.prefix_lines.v1":
+        if "prefix" in goal_lower or "label" in goal_lower:
+            score += 3
+    elif skill_id == "text.contains.v1":
+        if "contain" in goal_lower and ("phrase" in goal_lower or "substring" in goal_lower):
+            score += 3
+    elif skill_id == "text.starts_with.v1":
+        if "starts with" in goal_lower or "prefix" in goal_lower:
+            score += 3
+    elif "region:format_output" in tags:
+        if "format" in goal_lower:
+            score += 3
+    goal_tokens = set(re.findall(r"[a-z0-9]+", goal_lower))
+    for tag in tags:
+        tag_tokens = set(re.findall(r"[a-z0-9]+", tag.lower()))
+        if goal_tokens & tag_tokens:
+            score += 1
+    return score
 
 
 def _build_structural_reuse_ir(
@@ -500,21 +596,14 @@ def _build_structural_reuse_ir(
     workflow: IndexEntry,
     followups: list[IndexEntry],
 ) -> PlanningIR:
-    inputs = [
-        IRInput(name="input_path", type="string"),
-        IRInput(name="output_path", type="string"),
-        IRInput(name="cwd", type="string"),
-    ]
+    workflow_inputs = workflow.required_input_names or workflow.input_names
+    inputs = [IRInput(name=name, type="string") for name in workflow_inputs]
     steps = [
         IRStep(
             name="workflow",
             skill_id=workflow.id,
             version=workflow.version,
-            sources={
-                "input_path": IRSource(step="input", port="input_path"),
-                "output_path": IRSource(step="input", port="output_path"),
-                "cwd": IRSource(step="input", port="cwd"),
-            },
+            sources={name: IRSource(step="input", port=name) for name in workflow_inputs},
         )
     ]
     current_step = "workflow"
@@ -547,7 +636,7 @@ def _build_structural_reuse_ir(
         current_outputs = set(followup.output_names)
         all_effects.update(followup.effects)
 
-    final_output_port = sorted(current_outputs)[0]
+    final_output_port = _select_goal_aligned_output_port(goal, current_outputs)
     return PlanningIR(
         goal=goal,
         inputs=inputs,
@@ -555,6 +644,27 @@ def _build_structural_reuse_ir(
         final_outputs={final_output_port: IROutputRef(step=current_step, port=final_output_port)},
         effects=sorted(all_effects) or ["pure"],
     )
+
+
+def _select_goal_aligned_output_port(goal: str, outputs: set[str]) -> str:
+    goal_lower = goal.lower()
+    preferred = []
+    if "contain" in goal_lower:
+        preferred.append("result")
+    if "start" in goal_lower:
+        preferred.append("result")
+    if "prefix" in goal_lower or "label" in goal_lower:
+        preferred.append("prefixed")
+    if "summarize" in goal_lower or "summary" in goal_lower:
+        preferred.append("summary")
+    if "report" in goal_lower:
+        preferred.append("path")
+    if "output" in goal_lower:
+        preferred.append("stdout")
+    for port in preferred:
+        if port in outputs:
+            return port
+    return sorted(outputs)[0]
 
 
 def _match_output_to_input(outputs: set[str], input_name: str) -> str | None:
